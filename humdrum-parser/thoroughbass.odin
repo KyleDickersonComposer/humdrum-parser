@@ -60,10 +60,13 @@ Notation_Artifact :: union {
 }
 
 Metadata :: struct {
-	date:                string `json:"date"`,
-	publisher:           string `json:"publisher"`,
-	publisher_statement: string `json:"publisherStatement"`,
-	title:               string `json:"title"`,
+	date:                     string `json:"date"`,
+	publisher:                string `json:"publisher"`,
+	publisher_statement:      string `json:"publisherStatement"`,
+	title:                    string `json:"title"`,
+	compopser:                string `json:"composer"`,
+	catalog_number:           string `json:"catalogNumber"`,
+	publisher_catalog_number: string `json:"publisherCatalogNumber"`,
 }
 
 Music_IR_Json :: struct {
