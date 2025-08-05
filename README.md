@@ -17,7 +17,7 @@ RECORD_CODE -> CHAR + CHAR + CHAR ["@" | "@@" + LANGUAGE)];
 LANGUAGE -> CHAR + CHAR + CHAR;
 
 // only supporting kern for now!
-EXCLUISVE_INTERPRETATION_RECORD -> "**" + EXCLUSIVE_RECORD_KIND;
+EXCLUSIVE_INTERPRETATION_RECORD -> "**" + EXCLUSIVE_RECORD_KIND;
 EXCLUSIVE_RECORD_KIND -> "kern";
 
 // only voices for now!
@@ -57,7 +57,7 @@ DOT -> "." | "..";
 DURATION -> "1" | "2" | "4" | "8" | "16";
 ACCIDENTAL -> "n" | "-" | "--" | "#" | "##";
 // enforce char is the same in the repetitions
-NOTE_NAME -> // upper and lower A-G with repetitions denoting octave offsets
+NOTE_NAME -> // upper and lower A-G with repetitions denoting octave offsets from octave 4
 ```
 
 
