@@ -40,7 +40,7 @@ Token :: enum {
 }
 
 Tokenizer_Error :: enum {
-	Read_Outside_Array_Bounds,
+	Reached_End_Of_Array,
 	Invalid_Token,
 }
 
@@ -66,7 +66,7 @@ eat :: proc(p: ^Parser) -> rune {
 
 peek :: proc(p: ^Parser, offset: int = 1) -> (rune, Parse_Error) {
 	if p.index + 1 > len(p.data) {
-		return '0', .Read_Outside_Array_Bounds
+		return '0', .Reached_End_Of_Array
 	}
 	pos := p.index + offset
 
@@ -85,7 +85,6 @@ match :: proc(p: ^Parser, needle: rune) -> (pred: bool, err: Parse_Error) {
 
 eat_line :: proc(p: ^Parser) -> Parse_Error {
 	for {
-
 		r := peek(p) or_return
 
 		if r != '\n' {
@@ -124,10 +123,6 @@ parse :: proc() -> Parse_Error {
 			continue
 		}
 
-		if parser.index >= len(parser.data) {
-			return .Read_Outside_Array_Bounds
-		}
-
 		switch p0 {
 		case '!':
 			p1 := peek(&parser, 1) or_return
@@ -154,12 +149,9 @@ parse :: proc() -> Parse_Error {
 				}
 
 				if !is_valid_record_code {
-					log.warn(
-						"invalid record code:",
-						parsed_code,
-						"on line:",
-						parser.line_count + 1,
-					)
+					code := utf8.runes_to_string(parsed_code[:])
+					defer delete(code)
+					log.warn("unsupported record code:", code, "on line:", parser.line_count + 1)
 				}
 
 				if is_valid_record_code {
@@ -174,18 +166,43 @@ parse :: proc() -> Parse_Error {
 					eat(&parser)
 				}
 
+				is_white_space := peek(&parser) or_return
+				if is_white_space == ' ' {
+					eat(&parser)
+				}
+
 				// eat rest for now
 				eat_line(&parser)
 
 			} else {
 				log.warn(
 					fmt.aprintf(
-						"expected '!!!' at line %v, only reference records are supported.",
+						"expected '!!!' on line %v, only reference records are supported.",
 						parser.line_count + 1,
 					),
 				)
 				eat_line(&parser)
 			}
+
+		case '*':
+			log.error("* on line:", parser.line_count + 1)
+			eat_line(&parser)
+
+		case '=':
+			log.error("= on line:", parser.line_count + 1)
+			eat_line(&parser)
+
+		case '1', '2', '4', '8':
+			log.error("number on:", parser.line_count + 1)
+			eat_line(&parser)
+
+		case '.':
+			log.error("null record on:", parser.line_count + 1)
+			eat_line(&parser)
+
+		case '[':
+			log.error("tie start on:", parser.line_count + 1)
+			eat_line(&parser)
 
 		case:
 			log.error("invalid token on line:", parser.line_count + 1)
