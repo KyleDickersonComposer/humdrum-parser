@@ -64,6 +64,17 @@ Valid_Record_Code :: enum {
 	Publisher_Catalog_Number,
 }
 
+Valid_Tandem_Interpretation_Code :: enum {
+	IC_Vox,
+	I_Bass,
+	I_Tenor,
+	I_Alto,
+	I_Soprn,
+	Clef_F4,
+	Clef_Gv2,
+	Clef_G2,
+}
+
 eat :: proc(p: ^Parser) -> rune {
 	r := p.data[p.index]
 	p.index += 1
@@ -76,7 +87,7 @@ eat_until :: proc(p: ^Parser, rune_buffer: ^[dynamic]rune, needle: rune) -> Pars
 		return .Broke_Array_Bounds
 	}
 
-	for {
+	for i in 0 ..< 50 {
 		if p.data[p.index] != needle {
 			append(rune_buffer, p.data[p.index])
 			p.index += 1
@@ -85,6 +96,9 @@ eat_until :: proc(p: ^Parser, rune_buffer: ^[dynamic]rune, needle: rune) -> Pars
 			return nil
 		}
 	}
+
+	log.error("Eat 50 runes and failed to find match. This limit is abritrary and can be adjusted")
+	return .Rune_Match_Failed
 }
 
 eat_line :: proc(p: ^Parser, eated_list: ^[dynamic]rune) -> Parse_Error {
@@ -123,7 +137,7 @@ peek_until :: proc(p: ^Parser, peeked_runes: ^[dynamic]rune, needle: rune) -> (e
 	}
 
 	log.error(
-		"Peeked for 50 tokens and failed to find match. This is an arbitrary limit and can be raised.",
+		"Peeked for 50 tokens and failed to find match. This is an arbitrary limit and can be adjusted.",
 	)
 	return .Rune_Match_Failed
 }
@@ -176,11 +190,35 @@ compare_rune_slice :: proc(first: []rune, second: []rune) -> bool {
 	return true
 }
 
-create_valid_record_codes_map :: proc(the_map: ^map[Valid_Record_Code]string) {
+create_valid_record_code_map :: proc(the_map: ^map[Valid_Record_Code]string) {
 	the_map[.Scholarly_Catalog_Number] = "SCT"
 	the_map[.Publisher_Catalog_Number] = "PC#"
 }
 
+create_valid_tandem_interpretation_code_map :: proc(
+	the_map: ^map[Valid_Tandem_Interpretation_Code]string,
+) {
+	the_map[.IC_Vox] = "ICvox"
+	the_map[.I_Bass] = "Ibass"
+	the_map[.I_Tenor] = "Itenor"
+	the_map[.I_Alto] = "Ialto"
+	the_map[.I_Soprn] = "Isoprn"
+	the_map[.Clef_F4] = "clefF4"
+	the_map[.Clef_G2] = "clefG2"
+	the_map[.Clef_Gv2] = "clefGv2"
+}
+
+is_note_name_rune :: proc(note_name: rune) -> bool {
+	for nn in NOTE_NAMES {
+		if nn == note_name {
+			return true
+		}
+	}
+
+	return false
+}
+
+NOTE_NAMES :: []rune{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'a', 'b', 'c', 'd', 'e', 'f', 'g'}
 
 parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 	context.logger = log.create_console_logger()
@@ -208,6 +246,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 		}
 
 		switch p0 {
+		// reference record
 		case '!':
 			p1 := peek(&parser, 1) or_return
 			p2 := peek(&parser, 2) or_return
@@ -225,7 +264,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				peek_until(&parser, &parsed_code, ':') or_return
 
 				valid_record_codes := make(map[Valid_Record_Code]string)
-				create_valid_record_codes_map(&valid_record_codes)
+				create_valid_record_code_map(&valid_record_codes)
 
 				is_valid_record_code := false
 				for _, valid_code in valid_record_codes {
@@ -283,13 +322,89 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				eat_line(&parser, &eated) or_return
 			}
 
+		// tandem or exclusive interpretation
 		case '*':
 			p1 := peek(&parser) or_return
+			p2 := peek(&parser, 2) or_return
 
 			// matched tandem interpretation
 			if p1 != '*' {
+				eat(&parser)
+
+				// matched meter declaration
+				if p1 == 'M' && p2 != 'M' {
+					// TODO: this needs to handle tabs
+					eat_line(&parser, &eated)
+					continue
+				}
+
+				// matched spine terminator
+				if p1 == '-' {
+					// TODO: this needs to handle tabs
+					eat_line(&parser, &eated)
+					continue
+				}
+
+				// look for tandem interpretation code match
+				tic_map := make(map[Valid_Tandem_Interpretation_Code]string)
+				create_valid_tandem_interpretation_code_map(&tic_map)
+
+				peek_until(&parser, &eated, '\t')
+
+				// TODO: switch on enum here to handle the things
+				found_match := false
+				for _, v in tic_map {
+					if match_string(&parser, v) or_return {
+						eat_line(&parser, &eated) or_return
+						found_match = true
+						break
+					}
+				}
+
+				if found_match {
+					continue
+				}
+
+
+				// look for key match
+				// TODO:Handle tabs and meter parse here
+				if is_note_name_rune(p1) {
+					// NOTE: peek is one less because we ate the *
+					next_rune := peek(&parser, 1) or_return
+					// key_name doesn't contain accidental
+					if next_rune == ':' {
+						eat_line(&parser, &eated) or_return
+						continue
+					}
+
+					// key name contains accidental
+					if next_rune == '-' || next_rune == '#' {
+						if (peek(&parser, 2) or_return) != ':' {
+							log.error(
+								"expected ':' after key declaration on line:",
+								parser.line_count + 1,
+							)
+							eat_line(&parser, &eated) or_return
+							continue
+
+						}
+						eat_line(&parser, &eated) or_return
+						continue
+					}
+				}
+
+				// handle unsupported
+				clear(&eated)
+				eat_until(&parser, &eated, '\t') or_return
+				data := utf8.runes_to_string(eated[:])
+				log.warn(
+					"unsupported tandem interpreteation code:",
+					data,
+					"on line:",
+					parser.line_count + 1,
+				)
+
 				eat_line(&parser, &eated) or_return
-				log.debug("tandem?", eated)
 				continue
 			}
 
@@ -302,12 +417,14 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 					// TODO: this needs to handle the 4 columns thing
 					eat_until(&parser, &eated, '\t') or_return
 					eat_line(&parser, &eated)
+					continue
 				} else {
 					eat_until(&parser, &eated, '\t') or_return
 					data := utf8.runes_to_string(eated[:])
 					defer delete(data)
 
 					log.warn("unsupported exclusive record kind: ", data)
+					continue
 				}
 			}
 
