@@ -1,28 +1,109 @@
 package parser
 
+import t "../types"
+import "core:encoding/json"
+import "core:encoding/uuid"
 import "core:fmt"
 import "core:log"
+import "core:os"
 import "core:strings"
 import "core:unicode/utf8"
 
-parse :: proc(parse_data: ^[]rune) -> Parse_Error {
+parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error {
 	ref_records := make([dynamic]Reference_Record)
-	defer delete(ref_records)
 
 	tandem_interps := make([dynamic]Tandem_Interpretation)
-	defer delete(tandem_interps)
 
-	note_data_tokens := make([dynamic]Data)
+	voices := make([dynamic]t.Voice)
+
+	// TODO: init the voices and build map of IDs
+
+	voice_index_to_voice_ID := make(map[int]string, 4)
+	defer delete(voice_index_to_voice_ID)
+
+	for i in 0 ..< 4 {
+		voice_type := voice_index_to_voice_type(i) or_return
+
+		id := uuid.generate_v4()
+		buf := make([]byte, 36)
+		uuid.to_string_buffer(id, buf)
+
+		voice_index_to_voice_ID[i] = transmute(string)buf
+
+		is_bass := false
+
+		if voice_type == "bass" {
+			is_bass = true
+		}
+
+		append(
+			&voices,
+			t.Voice {
+				ID = transmute(string)buf,
+				type = voice_type,
+				voice_index_of_staff = i,
+				is_CF = false,
+				is_bass = true,
+				is_editable = true,
+			},
+		)
+	}
+
+	staffs := make([dynamic]t.Staff)
+	defer delete(staffs)
+
+	// TODO: init the staffs and build map of IDs
+	for i in 0 ..< 2 {
+		id := uuid.generate_v4()
+		buf := make([]byte, 36)
+		uuid.to_string_buffer(id, buf)
+
+		clef := "treble"
+
+		if i == 0 {
+			clef = "bass"
+		}
+
+		voice_IDs: []string
+		if i == 0 {
+			voice_IDs = []string{voice_index_to_voice_ID[0], voice_index_to_voice_ID[1]}
+		} else if i == 1 {
+			voice_IDs = []string{voice_index_to_voice_ID[2], voice_index_to_voice_ID[3]}
+		} else {
+			log.error("only supports two staff Bach Chorales")
+			return .Invalid_Staff_Count
+		}
+
+		append(
+			&staffs,
+			t.Staff {
+				ID = transmute(string)buf,
+				staff_index = i,
+				clef = clef,
+				voice_IDs = voice_IDs,
+			},
+		)
+
+	}
+
+	artifacts := make([dynamic]t.Notation_Artifact)
+	defer delete(artifacts)
+
+	note_data_tokens := make([dynamic]t.Note)
 	defer delete(note_data_tokens)
 
-	bar_data_tokens := make([dynamic]Data)
+	bar_data_tokens := make([dynamic]t.Layout)
 	defer delete(bar_data_tokens)
 
 	eated := make([dynamic]rune)
 	defer delete(eated)
 
 	key := ""
-	meter: Meter
+	meter: t.Meter
+
+	meta := t.Metadata{}
+
+	current_bar := 0
 
 	parser: Parser
 	parser.data = parse_data^
@@ -30,14 +111,11 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 	voice_index := 0
 	parser.current = parser.data[0]
 
-	note_creation_started := false
+	timestamp_array := [4]f32{1, 1, 1, 1}
 
+	note_creation_started := false
 	for {
 		clear(&eated)
-
-		if parser.index >= len(parser.data) {
-			return nil
-		}
 
 		switch parser.current {
 		case '!':
@@ -66,14 +144,18 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			eat_until(&parser, &record_code, ':')
 
 			to_string := utf8.runes_to_string(record_code[:])
-			defer delete(to_string)
 
-			eated_to_string := utf8.runes_to_string(eated[:])
+			eat_until(&parser, &eated, ':')
 
 			match_found := false
 			for k, v in vrc_map {
 				if to_string == v {
+					eat(&parser)
+					eat(&parser)
+					clear(&eated)
 					eat_until(&parser, &eated, '\n')
+
+					eated_to_string := utf8.runes_to_string(eated[:])
 
 					match_found = true
 					append(&ref_records, Reference_Record{code = k, data = eated_to_string})
@@ -229,22 +311,49 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 
 			bar_number := convert_runes_to_int(eated[1:]) or_return
 
-			append(&note_data_tokens, Bar{double_bar = false, key = key})
+			has_changed := false
+			if bar_number == 1 && len(bar_data_tokens) == 0 {
+				has_changed = true
+			}
+
+			append(
+				&bar_data_tokens,
+				t.Layout {
+					bar_number = bar_number,
+					key = key,
+					has_layout_changed = has_changed,
+					meter = meter,
+				},
+			)
+
+			current_bar += 1
+
+			// NOTE: need to reset timestamp_array every newline
+			for &i in timestamp_array {
+				i = 1
+			}
 
 			eat_until(&parser, &eated, '\n') or_return
 			continue
 
 		// match first char of note declaration
 		case '1', '2', '3', '4', '5', '6', '7', '8', '9', '[', '.':
-			note: Note
+			note: t.Note
 
 			if parser.current == '.' {
 				eat(&parser)
 				continue
 			}
 
+			if current_bar == 0 {
+				append(
+					&bar_data_tokens,
+					t.Layout{bar_number = 0, has_layout_changed = true, key = key, meter = meter},
+				)
+			}
+
 			if parser.current == '[' {
-				note.tie = 'i'
+				note.tie = "i"
 				eat(&parser)
 			}
 
@@ -256,7 +365,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			dots: int
 			if parser.current == '.' {
 				_, dots_repeat_count := parse_repeating_rune(&parser) or_return
-				dots = dots_repeat_count
+				dots = dots_repeat_count + 1
 			}
 
 			if !is_note_name_rune(parser.current) {
@@ -272,7 +381,6 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			note_rune, note_repeat_count := parse_repeating_rune(&parser) or_return
 
 			accid: string
-			defer delete(accid)
 			if is_accidental_rune(parser.current) {
 				out_runes := make([dynamic]rune)
 				length := parse_accidental(&parser, &out_runes) or_return
@@ -305,6 +413,11 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				eat(&parser)
 			}
 
+			if parser.current == ']' {
+				note.tie = "t"
+				eat(&parser)
+			}
+
 			// TODO: implement the fermata logic
 			if parser.current == ';' {
 				log.warn("ignoring fermatas for now!")
@@ -321,14 +434,51 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			full_note_name := fmt.aprintf("%v%v", note_name, accid)
 			defer delete(full_note_name)
 
-			note.note_name = full_note_name
-			note.duration = duration_as_int
-			note.octave = 4 + note_repeat_count
-			note.voice_index = voice_index
+			note_id := uuid.generate_v4()
+			buf := make([]byte, 36)
+			uuid.to_string_buffer(note_id, buf)
+
+			duration_to_string := fmt.aprintf("%v", duration_as_int)
+
 
 			if !is_lower_case_note_name {
-				note.octave -= 1
+				note_repeat_count -= 1
 			}
+
+			staff_index := 0
+			if voice_index > 2 {
+				staff_index = 1
+			}
+
+			scale: [7]string
+			create_scale(&scale, key)
+
+			duration_as_float := get_duration_as_float(duration_as_int) or_return
+
+			//done
+			note.ID = transmute(string)buf
+			note.duration = duration_to_string
+			note.is_rest = false
+			note.input_octave = 4 + note_repeat_count
+			note.accidental = accid
+			note.input_scale = key
+			note.dots = dots
+			note.voice_ID = voice_index_to_voice_ID[voice_index]
+			note.bar_number = current_bar
+			note.staff_ID = staffs[staff_index].ID
+			note.scale_degree = get_scale_degree(full_note_name, &scale) or_return
+
+
+			if note.dots == 0 {
+				note.timestamp = timestamp_array[voice_index]
+				timestamp_array[voice_index] += duration_as_float
+			} else {
+				account_for_the_dots := f32(note.dots) * (0.5 * duration_as_float)
+				note.timestamp = timestamp_array[voice_index]
+
+				timestamp_array[voice_index] += duration_as_float + account_for_the_dots
+			}
+
 
 			append(&note_data_tokens, note)
 
@@ -336,6 +486,16 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				eat_until(&parser, &eated, '\t')
 			}
 			continue
+
+		case 'a' ..< 'Z':
+			log.error(
+				"found an alphabetical character at the beginning of line:",
+				parser.line_count,
+				"at rune index:",
+				parser.index,
+				"invalid_line_start rune for 'kern', and likely to be an error of some kind",
+			)
+			return .Invalid_Token
 
 		case '\t':
 			voice_index += 1
@@ -348,15 +508,50 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			voice_index = 0
 			continue
 
-		case ' ':
-			eat(&parser)
-			continue
-
 		case '\r':
 			eat(&parser)
+
 			continue
 
 		case utf8.RUNE_EOF:
+			json_struct.voices = voices[:]
+			json_struct.notes = note_data_tokens[:]
+			json_struct.staffs = staffs[:]
+			json_struct.layouts = bar_data_tokens[:]
+			json_struct.artifacts = artifacts[:]
+
+			for rec in ref_records {
+				if rec.code == .Scholarly_Catalog_Number {
+					meta.catalog_number = rec.data
+				}
+
+				if rec.code == .Publisher_Catalog_Number {
+					meta.publisher_catalog_number = rec.data
+				}
+			}
+
+			json_struct.metadata = meta
+
+			opts := json.Marshal_Options {
+				pretty = true,
+			}
+
+			json_music_IR, err := json.marshal(json_struct^, opts)
+			if err != nil {
+				log.error(err)
+				return .Json_Serialization_Failed
+			}
+
+			file_name := fmt.aprintf(
+				"tmp/chorale-%v-%v",
+				meta.publisher_catalog_number,
+				meta.catalog_number,
+			)
+			defer delete(file_name)
+
+
+			write_file_err := os.write_entire_file_or_err(file_name, json_music_IR)
+
 			return nil
 		}
 	}

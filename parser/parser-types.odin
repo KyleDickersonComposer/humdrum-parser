@@ -1,11 +1,5 @@
 package parser
 
-Token :: union {
-	Reference_Record,
-	Tandem_Interpretation,
-	Data,
-}
-
 Reference_Record :: struct {
 	code: Valid_Record_Code,
 	data: string,
@@ -34,29 +28,6 @@ Note :: struct {
 	voice_index:       int,
 }
 
-Rest :: struct {
-	duration:  int,
-	timestamp: f32,
-}
-
-Meter :: struct {
-	numerator:   int,
-	denominator: int,
-	type:        string,
-}
-
-Bar :: struct {
-	double_bar: bool,
-	key:        string,
-	meter:      Meter,
-}
-
-Data :: union {
-	Note,
-	Bar,
-	Rest,
-}
-
 Tokenizer_Error :: enum {
 	None = 0,
 	Invalid_Token,
@@ -66,6 +37,9 @@ Tokenizer_Error :: enum {
 	Failed_To_Match_Rune,
 	Failed_To_Match_Accidental,
 	Failed_To_Parse_Repeating_Rune,
+	Failed_To_Determine_Scale_Degree,
+	Invalid_Voice_Index,
+	Invalid_Staff_Count,
 }
 
 Syntax_Error :: enum {
@@ -78,6 +52,8 @@ Syntax_Error :: enum {
 Conversion_Error :: enum {
 	None = 0,
 	Failed_To_Convert_To_Integer,
+	Failed_To_Convert_Duration_To_Float,
+	Json_Serialization_Failed,
 }
 
 Lookup_Error :: enum {

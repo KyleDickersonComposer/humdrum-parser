@@ -8,6 +8,7 @@ import "core:unicode/utf8"
 eat :: proc(p: ^Parser) {
 	p.index += 1
 	if p.index >= len(p.data) {
+		p.current = utf8.RUNE_EOF
 		return
 	}
 	p.current = p.data[p.index]
@@ -237,12 +238,12 @@ parse_repeating_rune :: proc(
 
 parse_int_runes :: proc(p: ^Parser) -> (value: int, err: Parse_Error) {
 	integer_runes: [3]rune
-	eat(p)
 	integer_runes[0] = p.current
+	eat(p)
 	for i in 1 ..< 3 {
 		if p.current >= '0' && p.current <= '9' {
-			eat(p)
 			integer_runes[i] = p.current
+			eat(p)
 		}
 	}
 
@@ -282,4 +283,136 @@ parse_accidental :: proc(
 
 	log.error("expected valid accidental, got:", out_runes)
 	return 0, .Malformed_Accidental
+}
+
+voice_index_to_voice_type :: proc(index: int) -> (string, Parse_Error) {
+	switch index {
+	case 0:
+		return "bass", nil
+	case 1:
+		return "tenor", nil
+	case 2:
+		return "alto", nil
+	case 3:
+		return "soprano", nil
+	case:
+		return "", .Invalid_Voice_Index
+	}
+}
+
+create_scale :: proc(s: ^[7]string, scale: string) -> Parse_Error {
+	switch scale {
+	case "C":
+		s^ = C_SCALE
+		return nil
+	case "D":
+		s^ = D_SCALE
+		return nil
+	case "E":
+		s^ = E_SCALE
+		return nil
+	case "F":
+		s^ = F_SCALE
+		return nil
+	case "G":
+		s^ = G_SCALE
+		return nil
+	case "A":
+		s^ = A_SCALE
+		return nil
+	case "B":
+		s^ = B_SCALE
+		return nil
+	case "C#":
+		s^ = C_SHARP_SCALE
+		return nil
+	case "F#":
+		s^ = F_SHARP_SCALE
+		return nil
+	case "Cb":
+		s^ = C_FLAT_SCALE
+		return nil
+	case "Db":
+		s^ = D_FLAT_SCALE
+		return nil
+	case "Eb":
+		s^ = E_FLAT_SCALE
+		return nil
+	case "Gb":
+		s^ = G_FLAT_SCALE
+		return nil
+	case "Ab":
+		s^ = A_FLAT_SCALE
+		return nil
+	case "Bb":
+		s^ = B_FLAT_SCALE
+		return nil
+	}
+
+	log.error("invalid scale:", scale)
+	return .Key_Lookup_Failed
+}
+
+get_scale_degree :: proc(note_name: string, scale: ^[7]string) -> (int, Parse_Error) {
+	note_name_rune: rune
+	for r in note_name {
+		note_name_rune = r
+		break
+	}
+
+	scale_degree_index_one_based := 1
+
+	loop_index := 0
+	for {
+		compare_rune: rune
+
+		note_name_of_scale := scale[loop_index % 7]
+
+		for r in note_name_of_scale {
+			compare_rune = r
+			break
+		}
+
+		if compare_rune == note_name_rune {
+			return scale_degree_index_one_based, nil
+		}
+
+		scale_degree_index_one_based += 1
+		loop_index += 1
+
+		if loop_index > 16 {
+			log.error(
+				"should have found scale_degree in scale:",
+				scale,
+				"based on note_name",
+				note_name,
+				"within 16 iterations.",
+			)
+
+			return 0, .Failed_To_Determine_Scale_Degree
+		}
+	}
+
+	return 0, .Failed_To_Determine_Scale_Degree
+}
+
+get_duration_as_float :: proc(duration: int) -> (f32, Parse_Error) {
+	switch duration {
+	case 1:
+		return 4, nil
+	case 2:
+		return 2, nil
+	case 4:
+		return 1, nil
+	case 8:
+		return 0.5, nil
+	case 16:
+		return 0.25, nil
+
+	case:
+		log.error("expected valid duration, got:", duration)
+		return 0, .Failed_To_Convert_Duration_To_Float
+	}
+
+	return 0, .Failed_To_Convert_Duration_To_Float
 }
