@@ -21,9 +21,11 @@ eat_until :: proc(p: ^Parser, rune_buffer: ^[dynamic]rune, needle: rune) -> Pars
 			return nil
 		}
 
-		current := eat(p)
+		current := peek(p, 0) or_return
 		if current == needle {
 			return nil
+		} else {
+			eat(p)
 		}
 
 		append(rune_buffer, current)

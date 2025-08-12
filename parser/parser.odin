@@ -96,6 +96,11 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 		case '*':
 			repeated_rune, repeat_count := parse_repeating_rune(&parser) or_return
 
+			if (peek(&parser, 0) or_return) == '-' {
+				eat_until(&parser, &eated, '\n')
+				continue
+			}
+
 			// matched exclusive interpretation
 			if repeat_count == 1 {
 				eat_until(&parser, &eated, '\t')
@@ -163,17 +168,26 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 
 			// matched meter
 			if len(ti_code) >= 3 && ti_code[0] == 'M' && ti_code[1] != 'M' {
-				eat(&parser)
-				eat(&parser)
+				without_m := ti_code[1:]
 
-				eat_until(&parser, &eated, '/')
+				slice_index := 0
+				for r, i in without_m {
+					if r == '/' {
+						slice_index = i
+					}
+				}
 
-				meter.numerator = convert_runes_to_int(eated[:]) or_return
+				meter.numerator = convert_runes_to_int(without_m[:slice_index]) or_return
 
-				clear(&eated)
+				without_slash := without_m[slice_index + 1:]
 
-				eat_until(&parser, &eated, '\t')
-				meter.denominator = convert_runes_to_int(eated[:]) or_return
+				for r, i in without_slash {
+					if r == '\t' {
+						slice_index = i
+					}
+				}
+
+				meter.denominator = convert_runes_to_int(without_m[slice_index + 1:]) or_return
 
 				if meter.numerator == 6 || meter.numerator == 9 || meter.numerator == 12 {
 					meter.type = "compound"
@@ -199,7 +213,6 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 
 		case '=':
 			if (peek(&parser) or_return) == '=' {
-				log.debug("found double_bar on line:", parser.line_count + 1)
 				eat_until(&parser, &eated, '\n') or_return
 				continue
 			}
@@ -316,22 +329,20 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				note.octave -= 1
 			}
 
-			log.debug("added note:", note, "on line:", parser.line_count + 1)
-
 			append(&note_data_tokens, note)
 
-			eat_until(&parser, &eated, '\t')
+			if voice_index < 3 {
+				eat_until(&parser, &eated, '\t')
+			}
 			continue
 
 		case '\t':
-			log.debug("incrementing voice_index on line:", parser.line_count + 1)
 			voice_index += 1
 			eat(&parser)
 			continue
 
 		case '\n':
 			eated := eat(&parser)
-			assert(eated == '\n')
 			parser.line_count += 1
 			voice_index = 0
 			continue
