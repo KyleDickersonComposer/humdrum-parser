@@ -5,10 +5,12 @@ import "core:log"
 import "core:strconv"
 import "core:unicode/utf8"
 
-eat :: proc(p: ^Parser) -> rune {
-	r := p.data[p.index]
+eat :: proc(p: ^Parser) {
 	p.index += 1
-	return r
+	if p.index >= len(p.data) {
+		return
+	}
+	p.current = p.data[p.index]
 }
 
 eat_until :: proc(p: ^Parser, rune_buffer: ^[dynamic]rune, needle: rune) -> Parse_Error {
@@ -21,14 +23,13 @@ eat_until :: proc(p: ^Parser, rune_buffer: ^[dynamic]rune, needle: rune) -> Pars
 			return nil
 		}
 
-		current := peek(p, 0) or_return
-		if current == needle {
+		if p.current == needle {
 			return nil
 		} else {
+			append(rune_buffer, p.current)
 			eat(p)
 		}
 
-		append(rune_buffer, current)
 	}
 
 	return nil
@@ -214,16 +215,16 @@ parse_repeating_rune :: proc(
 	repeat_count: int,
 	err: Parse_Error,
 ) {
-	rune_to_match := eat(p)
+	rune_to_match := p.current
+	eat(p)
 	count := 0
 
-	if (peek(p, 0) or_return) != rune_to_match {
+	if p.current != rune_to_match {
 		return rune_to_match, 0, nil
 	}
 
 	for i in 0 ..< 8 {
-		peeked := (peek(p, 0) or_return)
-		if peeked != rune_to_match {
+		if p.current != rune_to_match {
 			return rune_to_match, count, nil
 		}
 		eat(p)
@@ -236,11 +237,12 @@ parse_repeating_rune :: proc(
 
 parse_int_runes :: proc(p: ^Parser) -> (value: int, err: Parse_Error) {
 	integer_runes: [3]rune
-	integer_runes[0] = eat(p)
+	eat(p)
+	integer_runes[0] = p.current
 	for i in 1 ..< 3 {
-		peeked := (peek(p, 0) or_return)
-		if peeked >= '0' && peeked <= '9' {
-			integer_runes[i] = eat(p)
+		if p.current >= '0' && p.current <= '9' {
+			eat(p)
+			integer_runes[i] = p.current
 		}
 	}
 
@@ -259,21 +261,19 @@ parse_accidental :: proc(
 	length: int,
 	err: Parse_Error,
 ) {
-	append(out_runes, eat(p))
+	append(out_runes, p.current)
+	eat(p)
 
 	count := 1
 
 	for i in 1 ..< 4 {
-		peeked := peek(p, 0) or_return
-
-		if peeked != out_runes[0] {
-			append(out_runes, peeked)
+		if p.current != out_runes[0] {
 			return count, nil
 		}
 
-		if is_accidental_rune(peeked) && peeked == out_runes[0] {
+		if is_accidental_rune(p.current) && p.current == out_runes[0] {
 			count += 1
-			append(out_runes, peeked)
+			append(out_runes, p.current)
 		}
 	}
 

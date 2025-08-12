@@ -94,6 +94,7 @@ Parse_Error :: union #shared_nil {
 
 Parser :: struct {
 	data:       []rune,
+	current:    rune,
 	index:      int,
 	line_count: int,
 }

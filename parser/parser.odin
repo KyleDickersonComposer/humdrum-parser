@@ -28,6 +28,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 	parser.data = parse_data^
 	parser.index = 0
 	voice_index := 0
+	parser.current = parser.data[0]
 
 	note_creation_started := false
 
@@ -38,7 +39,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			return nil
 		}
 
-		switch parser.data[parser.index] {
+		switch parser.current {
 		case '!':
 			first_rune_of_line, repeat_count_of_rune := parse_repeating_rune(&parser) or_return
 
@@ -96,7 +97,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 		case '*':
 			repeated_rune, repeat_count := parse_repeating_rune(&parser) or_return
 
-			if (peek(&parser, 0) or_return) == '-' {
+			if parser.current == '-' {
 				eat_until(&parser, &eated, '\n')
 				continue
 			}
@@ -212,13 +213,13 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			}
 
 		case '=':
+			// double bar
 			if (peek(&parser) or_return) == '=' {
 				eat_until(&parser, &eated, '\n') or_return
 				continue
 			}
 
 			// bar numbers
-			val := eat(&parser)
 			eat_until(&parser, &eated, '\t') or_return
 
 			if eated[0] == '\t' {
@@ -226,7 +227,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				return .Malformed_Bar_Number
 			}
 
-			bar_number := convert_runes_to_int(eated[:]) or_return
+			bar_number := convert_runes_to_int(eated[1:]) or_return
 
 			append(&note_data_tokens, Bar{double_bar = false, key = key})
 
@@ -237,12 +238,12 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 		case '1', '2', '3', '4', '5', '6', '7', '8', '9', '[', '.':
 			note: Note
 
-			if (peek(&parser, 0) or_return) == '.' {
+			if parser.current == '.' {
 				eat(&parser)
 				continue
 			}
 
-			if (peek(&parser, 0) or_return) == '[' {
+			if parser.current == '[' {
 				note.tie = 'i'
 				eat(&parser)
 			}
@@ -253,15 +254,15 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			duration_as_int := parse_int_runes(&parser) or_return
 
 			dots: int
-			if (peek(&parser, 0) or_return) == '.' {
+			if parser.current == '.' {
 				_, dots_repeat_count := parse_repeating_rune(&parser) or_return
 				dots = dots_repeat_count
 			}
 
-			if !is_note_name_rune(peek(&parser, 0) or_return) {
+			if !is_note_name_rune(parser.current) {
 				log.error(
 					"malformed note_name:",
-					peek(&parser, 0) or_return,
+					parser.current,
 					"on line:",
 					parser.line_count + 1,
 				)
@@ -272,7 +273,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 
 			accid: string
 			defer delete(accid)
-			if is_accidental_rune(peek(&parser, 0) or_return) {
+			if is_accidental_rune(parser.current) {
 				out_runes := make([dynamic]rune)
 				length := parse_accidental(&parser, &out_runes) or_return
 				to_string := utf8.runes_to_string(out_runes[:length])
@@ -280,7 +281,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 				accid = to_string
 			}
 
-			if (peek(&parser, 0) or_return) == 'X' {
+			if parser.current == 'X' {
 				log.warn("hit courtesy accidental, ignoring")
 				eat(&parser)
 			}
@@ -294,18 +295,18 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 
 			if !is_lower_case_note_name do note_repeat_count *= -1
 
-			if (peek(&parser, 0) or_return) == 'L' {
+			if parser.current == 'L' {
 				log.warn("hit beam_open token, ignoring ")
 				eat(&parser)
 			}
 
-			if (peek(&parser, 0) or_return) == 'J' {
+			if parser.current == 'J' {
 				log.warn("hit beam_close token, ignoring ")
 				eat(&parser)
 			}
 
 			// TODO: implement the fermata logic
-			if (peek(&parser, 0) or_return) == ';' {
+			if parser.current == ';' {
 				log.warn("ignoring fermatas for now!")
 				eat(&parser)
 			}
@@ -342,7 +343,7 @@ parse :: proc(parse_data: ^[]rune) -> Parse_Error {
 			continue
 
 		case '\n':
-			eated := eat(&parser)
+			eat(&parser)
 			parser.line_count += 1
 			voice_index = 0
 			continue
