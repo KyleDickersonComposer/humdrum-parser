@@ -551,6 +551,10 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 
 
 			write_file_err := os.write_entire_file_or_err(file_name, json_music_IR)
+			if write_file_err != nil {
+				log.error(err)
+				return .Failed_To_Write_File
+			}
 
 			return nil
 		}

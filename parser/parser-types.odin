@@ -54,6 +54,7 @@ Conversion_Error :: enum {
 	Failed_To_Convert_To_Integer,
 	Failed_To_Convert_Duration_To_Float,
 	Json_Serialization_Failed,
+	Failed_To_Write_File,
 }
 
 Lookup_Error :: enum {
