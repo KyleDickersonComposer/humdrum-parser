@@ -418,11 +418,6 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 				eat(&parser)
 			}
 
-			// TODO: implement the fermata logic
-			if parser.current == ';' {
-				log.warn("ignoring fermatas for now!")
-				eat(&parser)
-			}
 
 			note_name := ""
 			to_runes := utf8.runes_to_string([]rune{note_rune})
@@ -439,6 +434,32 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			uuid.to_string_buffer(note_id, buf)
 
 			duration_to_string := fmt.aprintf("%v", duration_as_int)
+
+			fermata_id := uuid.generate_v4()
+			fermata_buf := make([]byte, 36)
+			uuid.to_string_buffer(note_id, fermata_buf)
+
+			fermata_staff_ID := ""
+			if voice_index > 2 {
+				fermata_staff_ID = staffs[1].ID
+			} else {
+				fermata_staff_ID = staffs[0].ID
+			}
+
+			if parser.current == ';' {
+				append(
+					&artifacts,
+					t.Fermata {
+						type = "fermata",
+						ID = transmute(string)fermata_buf,
+						place = "above",
+						bar_number = current_bar,
+						staff = fermata_staff_ID,
+						start_ID = transmute(string)buf,
+					},
+				)
+				eat(&parser)
+			}
 
 
 			if !is_lower_case_note_name {
