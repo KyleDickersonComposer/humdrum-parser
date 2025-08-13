@@ -12,6 +12,7 @@ Layout :: struct {
 	staff_grp_IDs:      []string `json:"staffGrpIDs"`,
 	key:                string `json:"key"`,
 	meter:              Meter `json:"meter"`,
+	right_barline_type: string `json:"rightBarlineType"`,
 }
 
 Staff_Grp :: struct {
@@ -51,6 +52,7 @@ Note :: struct {
 	bar_number:   int `json:"barNumber"`,
 	is_rest:      bool `json:"isRest"`,
 	timestamp:    f32 `json:"timestamp"`,
+	stem_dir:     string `json:"stemDir"`,
 }
 
 Fermata :: struct {

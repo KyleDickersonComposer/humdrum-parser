@@ -411,8 +411,47 @@ get_duration_as_float :: proc(duration: int) -> (f32, Parse_Error) {
 
 	case:
 		log.error("expected valid duration, got:", duration)
-		return 0, .Failed_To_Convert_Duration_To_Float
+		return 0, .Failed_To_Convert_Duration
 	}
 
-	return 0, .Failed_To_Convert_Duration_To_Float
+	return 0, .Failed_To_Convert_Duration
+}
+
+get_duration_as_string :: proc(duration: int) -> (string, Parse_Error) {
+	switch duration {
+	case 1:
+		return "whole", nil
+	case 2:
+		return "half", nil
+	case 4:
+		return "quarter", nil
+	case 8:
+		return "eighth", nil
+	case 16:
+		return "sixteenth", nil
+	case:
+		log.error("expected valid duration, got:", duration)
+		return "", .Failed_To_Convert_Duration
+	}
+	return "", .Failed_To_Convert_Duration
+}
+
+convert_humdrum_accidentals_to_normal_accidentals :: proc(accid: string) -> (string, Parse_Error) {
+	switch accid {
+	case "n":
+		return "n", nil
+	case "#":
+		return "#", nil
+	case "##":
+		return "##", nil
+	case "-":
+		return "b", nil
+	case "--":
+		return "bb", nil
+	case:
+		log.error("expected valid humdrum accidental, got:", accid)
+		return "", .Failed_To_Match_Accidental
+	}
+
+	return "", .Failed_To_Match_Accidental
 }

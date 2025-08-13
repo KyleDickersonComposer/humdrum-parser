@@ -41,9 +41,9 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			t.Voice {
 				ID = transmute(string)buf,
 				type = voice_type,
-				voice_index_of_staff = i,
+				voice_index_of_staff = i % 2,
 				is_CF = false,
-				is_bass = true,
+				is_bass = is_bass,
 				is_editable = true,
 			},
 		)
@@ -62,6 +62,7 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 		if i == 0 {
 			clef = "bass"
 		}
+
 
 		voice_IDs: []string
 		if i == 0 {
@@ -493,12 +494,19 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 
 			duration_as_float := get_duration_as_float(duration_as_int) or_return
 
+			corrected_accidental := ""
+			if accid != "" {
+				corrected_accidental = convert_humdrum_accidentals_to_normal_accidentals(
+					accid,
+				) or_return
+			}
+
 			//done
 			note.ID = transmute(string)buf
-			note.duration = duration_to_string
+			note.duration = get_duration_as_string(duration_as_int) or_return
 			note.is_rest = false
 			note.input_octave = 4 + note_repeat_count
-			note.accidental = accid
+			note.accidental = corrected_accidental
 			note.input_scale = key
 			note.dots = dots
 			note.voice_ID = voice_index_to_voice_ID[voice_index]
@@ -558,6 +566,22 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			json_struct.layouts = bar_data_tokens[:]
 			json_struct.artifacts = artifacts[:]
 			json_struct.staff_grps = staff_grps[:]
+
+			json_struct.layouts[len(json_struct.layouts) - 1].right_barline_type = "end"
+
+			for &n in json_struct.notes {
+				for v in json_struct.voices {
+					if n.voice_ID == v.ID {
+						if v.voice_index_of_staff == 0 {
+							n.stem_dir = "down"
+						} else {
+							n.stem_dir = "up"
+						}
+					}
+				}
+			}
+
+			log.debug(json_struct.notes[:2])
 
 			for rec in ref_records {
 				if rec.code == .Scholarly_Catalog_Number {

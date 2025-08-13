@@ -18,15 +18,6 @@ VALID_DATA_KIND :: enum {
 	Rest,
 }
 
-Note :: struct {
-	note_name:         string,
-	timestamp:         f32,
-	octave:            int,
-	duration:          int,
-	tie:               rune,
-	accidental_offset: int,
-	voice_index:       int,
-}
 
 Tokenizer_Error :: enum {
 	None = 0,
@@ -52,7 +43,7 @@ Syntax_Error :: enum {
 Conversion_Error :: enum {
 	None = 0,
 	Failed_To_Convert_To_Integer,
-	Failed_To_Convert_Duration_To_Float,
+	Failed_To_Convert_Duration,
 	Json_Serialization_Failed,
 	Failed_To_Write_File,
 }
