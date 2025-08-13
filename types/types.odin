@@ -14,6 +14,13 @@ Layout :: struct {
 	meter:              Meter `json:"meter"`,
 }
 
+Staff_Grp :: struct {
+	ID:                  string `json:"ID"`,
+	staff_def_IDs:       []string `json:"staffDefIDs"`,
+	parent_staff_grp_ID: string `json:"parentStaffGrpID", omitempty`,
+	bracket_style:       string `json:"bracketStyle"`,
+}
+
 Staff :: struct {
 	ID:          string `json:"ID"`,
 	voice_IDs:   []string `json:"voiceIDs"`,
@@ -70,10 +77,11 @@ Metadata :: struct {
 }
 
 Music_IR_Json :: struct {
-	metadata:  Metadata,
-	layouts:   []Layout `json:"layouts"`,
-	staffs:    []Staff `json:"staffs"`,
-	voices:    []Voice `json:"voices"`,
-	notes:     []Note `json:"notes"`,
-	artifacts: []Notation_Artifact `json:"notationArtifacts"`,
+	metadata:   Metadata,
+	layouts:    []Layout `json:"layouts"`,
+	staff_grps: []Staff_Grp `json:"staffGrps"`,
+	artifacts:  []Notation_Artifact `json:"notationArtifacts"`,
+	staffs:     []Staff `json:"staffs"`,
+	voices:     []Voice `json:"voices"`,
+	notes:      []Note `json:"notes"`,
 }

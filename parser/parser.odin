@@ -50,7 +50,6 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 	}
 
 	staffs := make([dynamic]t.Staff)
-	defer delete(staffs)
 
 	// TODO: init the staffs and build map of IDs
 	for i in 0 ..< 2 {
@@ -86,17 +85,27 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 
 	}
 
+	id := uuid.generate_v4()
+	buf := make([]byte, 36)
+	uuid.to_string_buffer(id, buf)
+	staff_grps := make([dynamic]t.Staff_Grp)
+	append(
+		&staff_grps,
+		t.Staff_Grp {
+			ID = transmute(string)buf,
+			staff_def_IDs = []string{staffs[0].ID, staffs[1].ID},
+			parent_staff_grp_ID = "",
+			bracket_style = "brace",
+		},
+	)
+
 	artifacts := make([dynamic]t.Notation_Artifact)
-	defer delete(artifacts)
 
 	note_data_tokens := make([dynamic]t.Note)
-	defer delete(note_data_tokens)
 
 	bar_data_tokens := make([dynamic]t.Layout)
-	defer delete(bar_data_tokens)
 
 	eated := make([dynamic]rune)
-	defer delete(eated)
 
 	key := ""
 	meter: t.Meter
@@ -322,11 +331,13 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 					bar_number = bar_number,
 					key = key,
 					has_layout_changed = has_changed,
+					staff_grp_IDs = []string{staff_grps[0].ID},
 					meter = meter,
 				},
 			)
 
 			current_bar += 1
+
 
 			// NOTE: need to reset timestamp_array every newline
 			for &i in timestamp_array {
@@ -345,10 +356,16 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 				continue
 			}
 
-			if current_bar == 0 {
+			if current_bar == 0 && len(bar_data_tokens) == 0 {
 				append(
 					&bar_data_tokens,
-					t.Layout{bar_number = 0, has_layout_changed = true, key = key, meter = meter},
+					t.Layout {
+						bar_number = 0,
+						has_layout_changed = true,
+						key = key,
+						meter = meter,
+						staff_grp_IDs = []string{staff_grps[0].ID},
+					},
 				)
 			}
 
@@ -540,6 +557,7 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			json_struct.staffs = staffs[:]
 			json_struct.layouts = bar_data_tokens[:]
 			json_struct.artifacts = artifacts[:]
+			json_struct.staff_grps = staff_grps[:]
 
 			for rec in ref_records {
 				if rec.code == .Scholarly_Catalog_Number {
