@@ -132,13 +132,13 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			first_rune_of_line, repeat_count_of_rune := parse_repeating_rune(&parser) or_return
 
 			if repeat_count_of_rune >= 3 {
-				log.warn("only supporting reference records, line:", parser.line_count + 1)
+				log.info("only supporting reference records, line:", parser.line_count + 1)
 				eat_until(&parser, &eated, '\n')
 				continue
 			}
 
 			if repeat_count_of_rune <= 1 {
-				log.warn("comments are ignored, line:", parser.line_count + 1)
+				log.info("comments are ignored, line:", parser.line_count + 1)
 				eat_until(&parser, &eated, '\n')
 				continue
 			}
@@ -312,14 +312,16 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			}
 
 			// bar numbers
+			eat(&parser)
+			clear(&eated)
 			eat_until(&parser, &eated, '\t') or_return
 
-			if eated[0] == '\t' {
-				log.error("couldn't parse bar_number:", eated)
+			if len(eated) == 0 {
+				log.error("couldn't parse bar_number: empty at line:", parser.line_count)
 				return .Malformed_Bar_Number
 			}
 
-			bar_number := convert_runes_to_int(eated[1:]) or_return
+			bar_number := convert_runes_to_int(eated[:]) or_return
 
 			has_changed := false
 			if bar_number == 1 && len(bar_data_tokens) == 0 {
@@ -408,7 +410,7 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			}
 
 			if parser.current == 'X' {
-				log.warn("hit courtesy accidental, ignoring")
+				log.info("hit courtesy accidental, ignoring")
 				eat(&parser)
 			}
 
@@ -422,12 +424,12 @@ parse :: proc(json_struct: ^t.Music_IR_Json, parse_data: ^[]rune) -> Parse_Error
 			if !is_lower_case_note_name do note_repeat_count *= -1
 
 			if parser.current == 'L' {
-				log.warn("hit beam_open token, ignoring ")
+				log.info("hit beam_open token, ignoring ")
 				eat(&parser)
 			}
 
 			if parser.current == 'J' {
-				log.warn("hit beam_close token, ignoring ")
+				log.info("hit beam_close token, ignoring ")
 				eat(&parser)
 			}
 
