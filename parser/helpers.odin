@@ -99,6 +99,7 @@ compare_rune_slice :: proc(first: []rune, second: []rune) -> bool {
 }
 
 create_valid_record_code_map :: proc(the_map: ^map[Valid_Record_Code]string) {
+	the_map[.Composer] = "COM"
 	the_map[.Scholarly_Catalog_Number] = "SCT"
 	the_map[.Publisher_Catalog_Number] = "PC#"
 }
@@ -106,6 +107,8 @@ create_valid_record_code_map :: proc(the_map: ^map[Valid_Record_Code]string) {
 create_valid_tandem_interpretation_code_map :: proc(
 	the_map: ^map[Valid_Tandem_Interpretation_Code]string,
 ) {
+	the_map[.Meter] = "M"
+	the_map[.Key_Signature] = "k"
 	the_map[.IC_Vox] = "ICvox"
 	the_map[.I_Bass] = "Ibass"
 	the_map[.I_Tenor] = "Itenor"

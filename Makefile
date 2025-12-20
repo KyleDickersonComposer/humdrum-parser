@@ -2,7 +2,7 @@ run:
 	odin run .
 
 test:
-	odin test ./tokenize
+	odin test ./tests
 
 test-all:
 	odin test ./...

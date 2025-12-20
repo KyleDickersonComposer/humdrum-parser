@@ -68,12 +68,14 @@ Parser :: struct {
 }
 
 Valid_Record_Code :: enum {
+	Composer,
 	Scholarly_Catalog_Number,
 	Publisher_Catalog_Number,
 }
 
 Valid_Tandem_Interpretation_Code :: enum {
 	Meter,
+	Key_Signature,
 	IC_Vox,
 	I_Bass,
 	I_Tenor,

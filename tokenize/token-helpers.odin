@@ -180,12 +180,16 @@ classify_exclamation_line :: proc(
 
 	_, repeat_count := parse_repeating_rune(p) or_return
 
-	if repeat_count <= 1 || repeat_count >= 3 {
-		return .Comment, nil
+	// repeat_count == 0 means ! (single) = comment (ignore, don't store)
+	// repeat_count == 1 means !! (double) = comment (ignore, don't store)
+	// repeat_count == 2 means !!! (triple) = reference record (metadata)
+	// repeat_count >= 3 means !!!! or more = comment (ignore, don't store)
+	if repeat_count == 2 {
+		return .Reference_Record, nil
 	}
 
-	// repeat_count == 2 means reference record
-	return .Reference_Record, nil
+	// Single !, double !!, or 4+ exclamation marks are comments (not stored)
+	return .Comment, nil
 }
 
 // Classify what kind of asterisk line this is (doesn't eat anything)
@@ -241,203 +245,368 @@ classify_tandem_interpretation :: proc(
 		return .Unknown, nil
 	}
 
-	// Check if it's a valid code
-	vtic_map := make(map[parser.Valid_Tandem_Interpretation_Code]string)
-	defer delete(vtic_map)
-	parser.create_valid_tandem_interpretation_code_map(&vtic_map)
-
 	ti_code_string := utf8.runes_to_string(ti_code[:])
-	for _, v in vtic_map {
-		if v == ti_code_string {
-			return .Valid_Code, nil
-		}
-	}
 
-	// Check if it's a key (starts with note name, length 2-3)
+	// Check if it's a key (starts with note name, length 2-3) FIRST
+	// This must come before valid code check
 	if (len(ti_code) == 2 || len(ti_code) == 3) && parser.is_note_name_rune(ti_code[0]) {
 		return .Key, nil
 	}
 
 	// Check if it's a meter (starts with 'M', length >= 3, second char is not 'M')
+	// This MUST come before valid code check, otherwise "M" in the map will match "M4/4"
 	if len(ti_code) >= 3 && ti_code[0] == 'M' && ti_code[1] != 'M' {
 		return .Meter, nil
+	}
+
+	// Check if it's a valid code
+	vtic_map := make(map[parser.Valid_Tandem_Interpretation_Code]string)
+	defer delete(vtic_map)
+	parser.create_valid_tandem_interpretation_code_map(&vtic_map)
+
+	for _, v in vtic_map {
+		// Exact match OR code starts with this valid code (e.g., "k" matches "k[]")
+		// BUT exclude patterns starting with "MM" (metronome marks like MM100)
+		if v == ti_code_string {
+			return .Valid_Code, nil
+		}
+		// For prefix matches, make sure it's not "MM" (metronome marks)
+		if len(ti_code_string) > len(v) && ti_code_string[:len(v)] == v {
+			// Special case: if matching "M", exclude "MM" patterns (metronome marks)
+			if v == "M" && len(ti_code_string) > 1 && ti_code_string[1] == 'M' {
+				continue
+			}
+			return .Valid_Code, nil
+		}
 	}
 
 	return .Unknown, nil
 }
 
-// Parse a valid tandem interpretation code
-parse_valid_tandem_code :: proc(
+// Parse a single valid tandem interpretation code (one spine)
+parse_single_valid_tandem_code :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]Token_With_Kind,
 	eated: ^[dynamic]rune,
 ) -> parser.Parse_Error {
-	// Eat the asterisks
-	_, _ = parse_repeating_rune(p) or_return
-
-	// Get the code
-	ti_code := make([dynamic]rune)
-	defer delete(ti_code)
-	parser.eat_until(p, &ti_code, '\t') or_return
-	ti_code_string := utf8.runes_to_string(ti_code[:])
-
-	// Match against valid codes
+	// Match against valid codes (create map once)
 	vtic_map := make(map[parser.Valid_Tandem_Interpretation_Code]string)
 	defer delete(vtic_map)
 	parser.create_valid_tandem_interpretation_code_map(&vtic_map)
 
-	for k, v in vtic_map {
-		if v == ti_code_string {
-			append(
-				tokens,
-				Token_With_Kind {
-					kind = .Tandem_Interpretation,
-					token = Token_Tandem_Interpretation{code = v, value = ti_code_string},
-					line = p.line_count,
-				},
-			)
-			parser.eat_until(p, eated, '\n') or_return
-			return nil
-		}
-	}
-
-	// Shouldn't happen if classification was correct
-	log.warn("valid code not found:", ti_code_string)
-	parser.eat_until(p, eated, '\n')
-	return nil
-}
-
-// Parse a key tandem interpretation
-parse_key_tandem :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]Token_With_Kind,
-	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
-	// Eat the asterisks
+	// Eat the asterisk
 	_, _ = parse_repeating_rune(p) or_return
 
 	// Get the code
 	ti_code := make([dynamic]rune)
 	defer delete(ti_code)
-	parser.eat_until(p, &ti_code, '\t') or_return
+	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+		append(&ti_code, p.current)
+		parser.eat(p)
+	}
+	ti_code_string := utf8.runes_to_string(ti_code[:])
 
-	// Extract key (remove first char which is the 'k')
-	ti_code_copy := make([dynamic]rune, len(ti_code))
-	copy(ti_code_copy[:], ti_code[:])
-	pop(&ti_code_copy)
-	defer delete(ti_code_copy)
+	// Match against valid codes
+	found := false
+	matched_code := ""
+	for k, v in vtic_map {
+		// Exact match OR code starts with this valid code (e.g., "k" matches "k[]")
+		if v == ti_code_string || (len(ti_code_string) > len(v) && ti_code_string[:len(v)] == v) {
+			matched_code = v
+			// Special handling for "k" - treat as key and parse the rest
+			if v == "k" {
+				// Parse as key with the full pattern as value
+				key_value := ""
+				if len(ti_code_string) > 1 {
+					key_value = ti_code_string[1:] // Everything after 'k' (e.g., "[]" or "[b-]")
+				}
+				append(
+					tokens,
+					Token_With_Kind {
+						kind = .Tandem_Interpretation,
+						token = Token_Tandem_Interpretation{code = "key", value = key_value, line = p.line_count},
+						line = p.line_count,
+					},
+				)
+			} else {
+				// Regular valid code
+				append(
+					tokens,
+					Token_With_Kind {
+						kind = .Tandem_Interpretation,
+						token = Token_Tandem_Interpretation{code = v, value = ti_code_string, line = p.line_count},
+						line = p.line_count,
+					},
+				)
+			}
+			found = true
+			break
+		}
+	}
 
-	out_buffer := ""
-	parser.key_table(ti_code_copy[:], &out_buffer) or_return
+	if !found {
+		// Shouldn't happen if classification was correct
+		log.warn("valid code not found:", ti_code_string)
+	}
 
-	append(
-		tokens,
-		Token_With_Kind {
-			kind = .Tandem_Interpretation,
-			token = Token_Tandem_Interpretation{code = "key", value = out_buffer},
-			line = p.line_count,
-		},
-	)
-
-	parser.eat_until(p, eated, '\n')
 	return nil
 }
 
-// Parse a meter tandem interpretation
+// Parse a single key tandem interpretation (one spine)
+parse_single_key_tandem :: proc(
+	p: ^parser.Parser,
+	tokens: ^[dynamic]Token_With_Kind,
+	eated: ^[dynamic]rune,
+) -> parser.Parse_Error {
+	// Eat the asterisk
+	_, _ = parse_repeating_rune(p) or_return
+
+	// Get the code
+	ti_code := make([dynamic]rune)
+	defer delete(ti_code)
+	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+		append(&ti_code, p.current)
+		parser.eat(p)
+	}
+
+	// Extract key - handle *a: format (note name keys)
+	// k[] patterns are handled in parse_single_valid_tandem_code
+	if len(ti_code) > 0 {
+		out_buffer := ""
+		// Format: *a: - remove ':' if present, pass note name
+		key_code := make([dynamic]rune)
+		defer delete(key_code)
+		end_idx := len(ti_code)
+		if len(ti_code) > 1 && ti_code[len(ti_code) - 1] == ':' {
+			end_idx = len(ti_code) - 1
+		}
+		for r in ti_code[:end_idx] {
+			append(&key_code, r)
+		}
+		parser.key_table(key_code[:], &out_buffer) or_return
+
+		append(
+			tokens,
+			Token_With_Kind {
+				kind = .Tandem_Interpretation,
+				token = Token_Tandem_Interpretation{code = "key", value = out_buffer, line = p.line_count},
+				line = p.line_count,
+			},
+		)
+	}
+
+	return nil
+}
+
+// Parse a single meter tandem interpretation (one spine)
+parse_single_meter_tandem :: proc(
+	p: ^parser.Parser,
+	tokens: ^[dynamic]Token_With_Kind,
+	eated: ^[dynamic]rune,
+) -> parser.Parse_Error {
+	// Eat the asterisk
+	_, _ = parse_repeating_rune(p) or_return
+
+	// Get the code
+	ti_code := make([dynamic]rune)
+	defer delete(ti_code)
+	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+		append(&ti_code, p.current)
+		parser.eat(p)
+	}
+
+	// Parse meter value (e.g., M4/4 -> "4/4")
+	if len(ti_code) >= 3 && ti_code[0] == 'M' && ti_code[1] != 'M' {
+		// Skip the 'M' and parse the rest (e.g., "4/4")
+		without_m := ti_code[1:]
+
+		// Find the slash
+		slash_index := -1
+		for r, i in without_m {
+			if r == '/' {
+				slash_index = i
+				break
+			}
+		}
+
+		if slash_index > 0 {
+			// Extract numerator and denominator
+			numerator_runes := without_m[:slash_index]
+			numerator := parser.convert_runes_to_int(numerator_runes) or_return
+
+			denominator_runes := without_m[slash_index + 1:]
+			if len(denominator_runes) > 0 {
+				denominator := parser.convert_runes_to_int(denominator_runes) or_return
+				meter_value := fmt.aprintf("%v/%v", numerator, denominator)
+
+				append(
+					tokens,
+					Token_With_Kind {
+						kind = .Tandem_Interpretation,
+						token = Token_Tandem_Interpretation{code = "Meter", value = meter_value, line = p.line_count},
+						line = p.line_count,
+					},
+				)
+			}
+		}
+	}
+
+	return nil
+}
+
+// Parse a meter tandem interpretation (DEPRECATED - use parse_single_meter_tandem)
 parse_meter_tandem :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]Token_With_Kind,
 	eated: ^[dynamic]rune,
 ) -> parser.Parse_Error {
-	// Eat the asterisks
-	_, _ = parse_repeating_rune(p) or_return
+	// Parse each spine on the line (tab-separated)
+	for {
+		// Eat the asterisk
+		_, _ = parse_repeating_rune(p) or_return
 
-	// Get the code
-	ti_code := make([dynamic]rune)
-	defer delete(ti_code)
-	parser.eat_until(p, &ti_code, '\t') or_return
+		// Get the code
+		ti_code := make([dynamic]rune)
+		defer delete(ti_code)
+		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+			append(&ti_code, p.current)
+			parser.eat(p)
+		}
 
-	// Parse meter (M<numerator>/<denominator>)
-	without_m := ti_code[1:]
-	slice_index := -1
-	for r, i in without_m {
-		if r == '/' {
-			slice_index = i
+		// Parse meter (M<numerator>/<denominator>)
+		if len(ti_code) > 1 {
+			without_m := ti_code[1:]
+			slice_index := -1
+			for r, i in without_m {
+				if r == '/' {
+					slice_index = i
+					break
+				}
+			}
+
+			if slice_index == -1 {
+				log.error(
+					"Invalid meter format: expected M<numerator>/<denominator> (e.g., M4/4), but found:",
+					utf8.runes_to_string(ti_code[:]),
+					"at line:",
+					p.line_count + 1,
+				)
+				return parser.Tokenizer_Error.Invalid_Token
+			} else {
+				numerator_runes := without_m[:slice_index]
+				if len(numerator_runes) > 0 {
+					numerator := parser.convert_runes_to_int(numerator_runes) or_return
+
+					without_slash := without_m[slice_index + 1:]
+					denom_slice_index := len(without_slash)
+					for r, i in without_slash {
+						if r == '\t' || r == ':' {
+							denom_slice_index = i
+							break
+						}
+					}
+
+					denominator_runes := without_slash[:denom_slice_index]
+					if len(denominator_runes) > 0 {
+						denominator := parser.convert_runes_to_int(denominator_runes) or_return
+						meter_value := fmt.aprintf("%v/%v", numerator, denominator)
+						// Note: Don't defer delete here - the string is stored in the token
+
+						append(
+							tokens,
+							Token_With_Kind {
+								kind = .Tandem_Interpretation,
+								token = Token_Tandem_Interpretation{code = "Meter", value = meter_value, line = p.line_count},
+								line = p.line_count,
+							},
+						)
+					}
+				}
+			}
+		}
+
+		// If we hit a tab, continue to next spine; if newline, we're done
+		if p.current == '\t' {
+			parser.eat(p)  // Eat the tab
+			continue
+		} else {
+			// Newline or EOF - done with this line
 			break
 		}
 	}
-
-	if slice_index == -1 {
-		log.warn("Meter format invalid, no '/' found:", utf8.runes_to_string(without_m))
-		parser.eat_until(p, eated, '\n')
-		return nil
-	}
-
-	numerator_runes := without_m[:slice_index]
-	if len(numerator_runes) == 0 {
-		log.warn("Meter numerator is empty")
-		parser.eat_until(p, eated, '\n')
-		return nil
-	}
-
-	numerator := parser.convert_runes_to_int(numerator_runes) or_return
-
-	without_slash := without_m[slice_index + 1:]
-	denom_slice_index := len(without_slash)
-	for r, i in without_slash {
-		if r == '\t' || r == ':' {
-			denom_slice_index = i
-			break
-		}
-	}
-
-	denominator_runes := without_slash[:denom_slice_index]
-	if len(denominator_runes) == 0 {
-		log.warn("Meter denominator is empty")
-		parser.eat_until(p, eated, '\n')
-		return nil
-	}
-
-	denominator := parser.convert_runes_to_int(denominator_runes) or_return
-	meter_value := fmt.aprintf("M%v/%v", numerator, denominator)
-	defer delete(meter_value)
-
-	append(
-		tokens,
-		Token_With_Kind {
-			kind = .Tandem_Interpretation,
-			token = Token_Tandem_Interpretation{code = "M", value = meter_value},
-			line = p.line_count,
-		},
-	)
-
-	parser.eat_until(p, eated, '\n')
 	return nil
 }
 
-// Parse an unknown/unsupported tandem interpretation
-parse_unknown_tandem :: proc(
+// Parse a single unknown/unsupported tandem interpretation (one spine)
+parse_single_unknown_tandem :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]Token_With_Kind,
 	eated: ^[dynamic]rune,
 ) -> parser.Parse_Error {
-	// Eat the asterisks
+	// Eat the asterisk
 	_, _ = parse_repeating_rune(p) or_return
 
 	// Get the code for logging
 	ti_code := make([dynamic]rune)
 	defer delete(ti_code)
-	parser.eat_until(p, &ti_code, '\t') or_return
+	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+		append(&ti_code, p.current)
+		parser.eat(p)
+	}
 	ti_code_string := utf8.runes_to_string(ti_code[:])
 
-	log.warn(
-		"unsupported tandem interpretation code:",
-		ti_code_string,
-		"on line:",
-		p.line_count + 1,
-	)
+	if len(ti_code_string) > 0 {
+		log.warn(
+			"Unsupported tandem interpretation code:",
+			ti_code_string,
+			"at line:",
+			p.line_count + 1,
+			"- ignoring (not in valid codes map)",
+		)
+	}
 
-	parser.eat_until(p, eated, '\n')
+	return nil
+}
+
+// Parse an unknown/unsupported tandem interpretation (DEPRECATED - use parse_single_unknown_tandem)
+parse_unknown_tandem :: proc(
+	p: ^parser.Parser,
+	tokens: ^[dynamic]Token_With_Kind,
+	eated: ^[dynamic]rune,
+) -> parser.Parse_Error {
+	// Parse each spine on the line (tab-separated)
+	for {
+		// Eat the asterisk
+		_, _ = parse_repeating_rune(p) or_return
+
+		// Get the code for logging
+		ti_code := make([dynamic]rune)
+		defer delete(ti_code)
+		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+			append(&ti_code, p.current)
+			parser.eat(p)
+		}
+		ti_code_string := utf8.runes_to_string(ti_code[:])
+
+		if len(ti_code_string) > 0 {
+			log.warn(
+				"Unsupported tandem interpretation code:",
+				ti_code_string,
+				"at line:",
+				p.line_count + 1,
+				"- ignoring (not in valid codes map)",
+			)
+		}
+
+		// If we hit a tab, continue to next spine; if newline, we're done
+		if p.current == '\t' {
+			parser.eat(p)  // Eat the tab
+			continue
+		} else {
+			// Newline or EOF - done with this line
+			break
+		}
+	}
 	return nil
 }
 
@@ -451,22 +620,17 @@ parse_exclamation_line :: proc(
 
 	switch line_kind {
 	case .Comment:
+		// Comments are ignored - just eat the line without creating a token
 		log.info("comments are ignored, line:", p.line_count + 1)
-		// Eat entire comment line
+		// Eat all the exclamation marks
+		_, _ = parse_repeating_rune(p) or_return
+		// Eat rest of comment line (no token created)
+		clear(eated)
 		parser.eat_until(p, eated, '\n')
-		text := utf8.runes_to_string(eated[:])
-		append(
-			tokens,
-			Token_With_Kind {
-				kind = .Comment,
-				token = Token_Comment{text = text},
-				line = p.line_count,
-			},
-		)
 		return nil
 
 	case .Reference_Record:
-		// Eat the !!
+		// Eat the !!!
 		_, _ = parse_repeating_rune(p) or_return
 
 		// Eat code until ':'
@@ -498,7 +662,7 @@ parse_exclamation_line :: proc(
 					tokens,
 					Token_With_Kind {
 						kind = .Reference_Record,
-						token = Token_Reference_Record{code = k, data = data_string},
+						token = Token_Reference_Record{code = k, data = data_string, line = p.line_count},
 						line = p.line_count,
 					},
 				)
@@ -506,24 +670,19 @@ parse_exclamation_line :: proc(
 			}
 		}
 
-		// Unsupported code - treat as comment
+		// Unsupported code - ignore (no token created)
 		if !match_found {
 			log.warn(
 				"unsupported reference record code:",
 				code_string,
+				"line count:",
+				p.line_count,
 				"on line:",
 				p.line_count + 1,
 			)
-			// Eat rest of line
+			// Eat rest of line (no token created)
+			clear(eated)
 			parser.eat_until(p, eated, '\n')
-			append(
-				tokens,
-				Token_With_Kind {
-					kind = .Comment,
-					token = Token_Comment{text = code_string},
-					line = p.line_count,
-				},
-			)
 			return nil
 		}
 		return nil
@@ -548,17 +707,44 @@ parse_asterisk_line :: proc(
 		return parse_exclusive_interpretation(p, tokens, eated)
 
 	case .Tandem_Interpretation:
-		ti_type := classify_tandem_interpretation(p) or_return
-		switch ti_type {
-		case .Valid_Code:
-			return parse_valid_tandem_code(p, tokens, eated)
-		case .Key:
-			return parse_key_tandem(p, tokens, eated)
-		case .Meter:
-			return parse_meter_tandem(p, tokens, eated)
-		case .Unknown:
-			return parse_unknown_tandem(p, tokens, eated)
+		// Parse each spine on the line - classify each spine individually
+		for {
+			// Save position before classification
+			saved_index := p.index
+			saved_current := p.current
+			
+			// Classify this spine
+			ti_type := classify_tandem_interpretation(p) or_return
+			
+			// Restore position after classification
+			p.index = saved_index
+			p.current = saved_current
+			
+			switch ti_type {
+			case .Valid_Code:
+				// Parse just this spine (will consume until tab or newline)
+				parse_single_valid_tandem_code(p, tokens, eated) or_return
+			case .Key:
+				// Parse just this spine (will consume until tab or newline)
+				parse_single_key_tandem(p, tokens, eated) or_return
+			case .Meter:
+				// Parse just this spine (will consume until tab or newline)
+				parse_single_meter_tandem(p, tokens, eated) or_return
+			case .Unknown:
+				// Parse just this spine (will consume until tab or newline)
+				parse_single_unknown_tandem(p, tokens, eated) or_return
+			}
+			
+			// If we hit a tab, continue to next spine; if newline, we're done
+			if p.current == '\t' {
+				parser.eat(p)  // Eat the tab
+				continue
+			} else {
+				// Newline or EOF - done with this line
+				break
+			}
 		}
+		return nil
 	}
 
 	return nil
@@ -579,35 +765,48 @@ parse_null_interpretation :: proc(
 	return nil
 }
 
-// Parse exclusive interpretation (*kern)
+// Parse exclusive interpretation (**kern)
 parse_exclusive_interpretation :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]Token_With_Kind,
 	eated: ^[dynamic]rune,
 ) -> parser.Parse_Error {
-	// Eat the single *
-	parser.eat(p)
-	// Eat spine type until tab
-	parser.eat_until(p, eated, '\t')
-	spine_type := utf8.runes_to_string(eated[:])
+	// Parse each spine on the line (tab-separated)
+	for {
+		// Eat both asterisks (**)
+		_, _ = parse_repeating_rune(p) or_return
+		// Clear buffer and eat spine type until tab or newline
+		clear(eated)
+		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+			append(eated, p.current)
+			parser.eat(p)
+		}
+		spine_type := utf8.runes_to_string(eated[:])
 
-	// Validate (matching logic)
-	if spine_type != "kern" {
-		log.error("expected: kern", "got:", spine_type, "on line:", p.line_count + 1)
-		return parser.Tokenizer_Error.Unsupported_Exclusive_Interpretation_Code
+		// Validate (matching logic)
+		if spine_type != "kern" {
+			log.error("expected: kern", "got:", spine_type, "on line:", p.line_count + 1)
+			return parser.Tokenizer_Error.Unsupported_Exclusive_Interpretation_Code
+		}
+
+		append(
+			tokens,
+			Token_With_Kind {
+				kind = .Exclusive_Interpretation,
+				token = Token_Exclusive_Interpretation{spine_type = spine_type, line = p.line_count},
+				line = p.line_count,
+			},
+		)
+
+		// If we hit a tab, continue to next spine; if newline, we're done
+		if p.current == '\t' {
+			parser.eat(p)  // Eat the tab
+			continue
+		} else {
+			// Newline or EOF - done with this line
+			break
+		}
 	}
-
-	append(
-		tokens,
-		Token_With_Kind {
-			kind = .Exclusive_Interpretation,
-			token = Token_Exclusive_Interpretation{spine_type = spine_type},
-			line = p.line_count,
-		},
-	)
-
-	// Eat rest of line
-	parser.eat_until(p, eated, '\n')
 	return nil
 }
 
@@ -624,7 +823,7 @@ parse_equals_line :: proc(
 		parser.eat(p)
 		append(
 			tokens,
-			Token_With_Kind{kind = .Double_Bar, token = Token_Double_Bar{}, line = p.line_count},
+			Token_With_Kind{kind = .Double_Bar, token = Token_Double_Bar{line = p.line_count}, line = p.line_count},
 		)
 		// Eat rest of line
 		parser.eat_until(p, eated, '\n') or_return
@@ -662,7 +861,7 @@ parse_bar_line :: proc(
 		tokens,
 		Token_With_Kind {
 			kind = .Bar_Line,
-			token = Token_Bar_Line{bar_number = bar_number},
+			token = Token_Bar_Line{bar_number = bar_number, line = p.line_count},
 			line = p.line_count,
 		},
 	)
@@ -677,19 +876,17 @@ parse_note :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]Token_With_Kind,
 	eated: ^[dynamic]rune,
-	tie_start: bool = false,
 ) -> parser.Parse_Error {
 	note_token := Token_Note{}
 
-	// Set tie_start from parameter (explicit)
-	note_token.tie_start = tie_start
+	// Initialize note token
+	note_token.tie_start = false
 	note_token.tie_end = false
 	note_token.has_fermata = false
 	note_token.is_lower_case = false
 
 	// Eat duration
 	if p.current < '0' || p.current > '9' {
-		log.error("Expected digit for note duration, got:", p.current, "at line:", p.line_count)
 		return parser.Syntax_Error.Malformed_Note
 	}
 	note_token.duration = parse_int_runes(p) or_return
@@ -700,17 +897,37 @@ parse_note :: proc(
 		note_token.dots = dots_repeat_count + 1
 	}
 
+	// HARD ERROR: # and - are accidentals and MUST appear AFTER a note name
+	// Standalone "4#" or "4-" should never exist - these must error
+	if p.current == '#' || p.current == '-' {
+		log.error(
+			"Invalid note: found standalone accidental '",
+			p.current,
+			"' after duration. Accidentals must appear after a note name (e.g., '4G#', not '4#'). Line:",
+			p.line_count + 1,
+		)
+		return parser.Syntax_Error.Malformed_Note
+	}
+
 	// Eat note name
 	if !parser.is_note_name_rune(p.current) {
-		log.error("malformed note_name:", p.current, "on line:", p.line_count + 1)
+		log.error(
+			"malformed note_name: character '",
+			p.current,
+			"' (rune:",
+			p.current,
+			") is not a valid note name rune on line:",
+			p.line_count + 1,
+		)
 		return parser.Syntax_Error.Malformed_Note
 	}
 	note_rune, note_repeat_count := parse_repeating_rune(p) or_return
 	note_token.note_repeat_count = note_repeat_count
 
-	// Eat accidental if present
+	// Eat accidental if present (# = sharp, - = flat)
 	if is_accidental_rune(p.current) {
 		out_runes := make([dynamic]rune)
+		defer delete(out_runes)
 		length := parse_accidental(p, &out_runes) or_return
 		to_string := utf8.runes_to_string(out_runes[:length])
 		note_token.accidental = to_string
@@ -732,23 +949,10 @@ parse_note :: proc(
 
 	if !note_token.is_lower_case do note_token.note_repeat_count *= -1
 
-	// Eat beam open if present
-	if p.current == 'L' {
-		log.info("hit beam_open token, ignoring ")
-		parser.eat(p)
-	}
+	// Note: 'L' (beam open) and 'J' (beam close) are now handled at the tokenizer level
+	// They are ignored whether they appear standalone or after a note
 
-	// Eat beam close if present
-	if p.current == 'J' {
-		log.info("hit beam_close token, ignoring ")
-		parser.eat(p)
-	}
-
-	// Eat tie end if present
-	if p.current == ']' {
-		note_token.tie_end = true
-		parser.eat(p)
-	}
+	// Note: ']' (tie end) is now handled as a separate token in the tokenizer
 
 	// Eat fermata if present
 	if p.current == ';' {
@@ -760,18 +964,61 @@ parse_note :: proc(
 		note_token.note_repeat_count -= 1
 	}
 
-	// Set note name
-	note_name := ""
+	// Set note name - note_name is just the single letter (A-G)
+	// The octave offset is stored in note_repeat_count (handled by parse_repeating_rune)
 	to_runes := utf8.runes_to_string([]rune{note_rune})
 	defer delete(to_runes)
 	to_string := strings.to_upper(to_runes)
-	defer delete(to_string)
-	note_token.note_name = to_string
+	// Note: Don't defer delete to_string here - it's stored in the token
 
+	// Validate note name - must be a valid note letter (A-G)
+	// Note: Repeated note names (CC, cc) are valid - the repeat count is in note_repeat_count
+	if len(to_string) == 0 {
+		log.error(
+			"Invalid note: empty note name at line:",
+			p.line_count + 1,
+		)
+		return parser.Syntax_Error.Malformed_Note
+	}
+
+	// Check that the note name is a valid note letter A-G
+	note_name_runes := utf8.string_to_runes(to_string)
+	defer delete(note_name_runes)
+	
+	if len(note_name_runes) != 1 || !parser.is_note_name_rune(note_name_runes[0]) {
+		log.error(
+			"Invalid note name:",
+			to_string,
+			"rune:",
+			note_rune,
+			"(expected single letter A-G) at line:",
+			p.line_count + 1,
+		)
+		return parser.Syntax_Error.Malformed_Note
+	}
+
+	note_token.note_name = to_string
+	note_token.line = p.line_count
+	
 	append(tokens, Token_With_Kind{kind = .Note, token = note_token, line = p.line_count})
 
-	// Eat until tab
-	parser.eat_until(p, eated, '\t')
+	// Eat until tab, but validate characters we encounter
+	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+		// Hard error: '.' (continuation token) should not appear after a note
+		if p.current == '.' {
+			log.error(
+				"Invalid token: continuation token '.' found after note. Line:",
+				p.line_count + 1,
+			)
+			return parser.Syntax_Error.Malformed_Note
+		}
+		// Stop eating if we encounter beaming characters (J, L) - let tokenizer handle them
+		if p.current == 'J' || p.current == 'L' {
+			break
+		}
+		append(eated, p.current)
+		parser.eat(p)
+	}
 	return nil
 }
 
