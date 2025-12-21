@@ -11,22 +11,11 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 	tokens: [dynamic]Token_With_Kind,
 	err: parser.Parse_Error,
 ) {
-	// Create a virtual arena allocator for all token string allocations
-	// Arena is not destroyed here - strings need to persist after return
-	// OS will clean up virtual memory on program exit
-	arena: virtual.Arena
-	alloc_err := virtual.arena_init_growing(&arena)
-	if alloc_err != nil {
-		return tokens, parser.Tokenizer_Error.Failed_To_Parse_Repeating_Rune
-	}
-	// Note: Arena intentionally not destroyed - strings must remain valid
+	// Main arena is set in context.allocator (from main) - use for persistent strings
+	// Scratch arena is in context.temp_allocator - use for temporary allocations
 	
-	// Set context.allocator to use the arena for all string allocations
-	saved_allocator := context.allocator
-	context.allocator = virtual.arena_allocator(&arena)
-	defer context.allocator = saved_allocator
-
-	tokens = make([dynamic]Token_With_Kind)
+	// Tokens array uses main arena (needs to persist until after parse phase)
+	tokens = make([dynamic]Token_With_Kind, 0, context.allocator)
 
 	p: parser.Parser
 	p.data = parse_data^
@@ -38,8 +27,8 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 		return tokens, nil
 	}
 
-	eated := make([dynamic]rune)
-	defer delete(eated)
+	// Temporary buffer uses scratch allocator (no delete needed - arena handles it)
+	eated := make([dynamic]rune, 0, context.temp_allocator)
 
 	for {
 		clear(&eated)
@@ -158,7 +147,7 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 }
 
 // Cleanup function for integration tests
-// Deletes the tokens array. Arena memory is cleaned up by OS on program exit.
+// Tokens array uses default allocator, so it can be safely deleted
 cleanup_tokens :: proc(tokens: ^[dynamic]Token_With_Kind) {
 	delete(tokens^)
 }

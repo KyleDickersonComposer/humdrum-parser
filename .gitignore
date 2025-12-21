@@ -1,4 +1,19 @@
-humdrum-data
+# Build artifacts
+bin/
+tmp/
+
+# IDE files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Odin specific
+*.dSYM/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
 humdrum-parser
-bin
-tmp

@@ -1,8 +1,9 @@
 package tests
 
-import "../tokenize"
 import "../parser"
+import "../tokenize"
 import "core:fmt"
+import "core:mem/virtual"
 import "core:testing"
 import "core:unicode/utf8"
 
@@ -10,6 +11,24 @@ import "core:unicode/utf8"
 // Tests the full tokenization flow including cleanup
 @(test)
 test_tokenize_integration :: proc(t: ^testing.T) {
+	// Setup arenas like main() does
+	main_arena: virtual.Arena
+	alloc_err := virtual.arena_init_growing(&main_arena)
+	if alloc_err != nil {
+		testing.fail_now(t, "Failed to initialize main arena")
+	}
+	defer virtual.arena_destroy(&main_arena)
+	
+	scratch_arena: virtual.Arena
+	scratch_err := virtual.arena_init_growing(&scratch_arena)
+	if scratch_err != nil {
+		testing.fail_now(t, "Failed to initialize scratch arena")
+	}
+	defer virtual.arena_destroy(&scratch_arena)
+	
+	context.allocator = virtual.arena_allocator(&main_arena)
+	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
+	
 	// Test data covering various token types
 	data := `!!!COM: Bach, Johann Sebastian
 !!!SCT: BWV 420
@@ -20,14 +39,16 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 8G#	8B	.	8b
 4A	4c	4e	4a
 `
+
+
 	parse_data := utf8.string_to_runes(data)
 	defer delete(parse_data)
 
 	tokens, err := tokenize.tokenize(&parse_data)
 	defer tokenize.cleanup_tokens(&tokens)
-	
+
 	testing.expect_value(t, err, nil)
-	
+
 	// Count tokens by type
 	note_count := 0
 	ref_count := 0
@@ -35,7 +56,7 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 	tandem_count := 0
 	line_break_count := 0
 	voice_sep_count := 0
-	
+
 	for token in tokens {
 		#partial switch token.kind {
 		case .Note:
@@ -51,8 +72,11 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 		case .Tandem_Interpretation:
 			tand := token.token.(tokenize.Token_Tandem_Interpretation)
 			// Verify we have ICvox and Meter tandem interpretations
-			testing.expect(t, tand.code == "ICvox" || tand.code == "Meter", 
-				fmt.tprintf("Tandem should be ICvox or Meter, got: %s", tand.code))
+			testing.expect(
+				t,
+				tand.code == "ICvox" || tand.code == "Meter",
+				fmt.tprintf("Tandem should be ICvox or Meter, got: %s", tand.code),
+			)
 			if tand.code == "Meter" {
 				testing.expect_value(t, tand.value, "4/4")
 			}
@@ -63,7 +87,7 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 			voice_sep_count += 1
 		}
 	}
-	
+
 	// Exact expected counts:
 	// Reference records: !!!COM, !!!SCT, !!!PC# = 3
 	testing.expect_value(t, ref_count, 3)
@@ -76,5 +100,3 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 	// Line breaks: 8 lines of data = 8 line breaks
 	testing.expect_value(t, line_break_count, 8)
 }
-
-

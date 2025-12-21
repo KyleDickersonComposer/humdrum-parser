@@ -1,19 +1,21 @@
 package parse_syntax
 
-import "../tokenize"
 import "../parser"
+import "../tokenize"
 import "core:log"
 
-parse_syntax :: proc(tokens: ^[dynamic]tokenize.Token_With_Kind) -> (
+parse_syntax :: proc(
+	tokens: ^[dynamic]tokenize.Token_With_Kind,
+) -> (
 	tree: Syntax_Tree,
 	err: parser.Parse_Error,
 ) {
 	tree.records = make([dynamic]Record_With_Kind)
 
-		token_index := 0
-		current_line_tokens: [4][dynamic]tokenize.Token_Note
-		current_voice_index := 0
-		last_note_voice_index := -1  // Track which voice the last note was added to
+	token_index := 0
+	current_line_tokens: [4][dynamic]tokenize.Token_Note
+	current_voice_index := 0
+	last_note_voice_index := -1 // Track which voice the last note was added to
 
 	for token_index < len(tokens) {
 		token := tokens[token_index]
@@ -87,28 +89,37 @@ parse_syntax :: proc(tokens: ^[dynamic]tokenize.Token_With_Kind) -> (
 		case .Tie_Start:
 			// Tie_Start must be followed immediately by a Note token
 			if token_index + 1 >= len(tokens) {
-				log.error("Tie_Start token at line", token.line + 1, "not followed by a Note token")
-				return .Invalid_Token
+				log.error(
+					"Tie_Start token at line",
+					token.line + 1,
+					"not followed by a Note token",
+				)
+				return {}, .Invalid_Token
 			}
 			next_token := &tokens[token_index + 1]
 			if next_token.kind != .Note {
-				log.error("Tie_Start token at line", token.line + 1, "must be followed by a Note token, got:", next_token.kind)
-				return .Invalid_Token
+				log.error(
+					"Tie_Start token at line",
+					token.line + 1,
+					"must be followed by a Note token, got:",
+					next_token.kind,
+				)
+				return {}, .Invalid_Token
 			}
 			// Set tie_start on the next note token
 			note := &next_token.token.(tokenize.Token_Note)
 			note.tie_start = true
-			// Don't increment token_index yet - let the Note case handle it
+		// Don't increment token_index yet - let the Note case handle it
 
 		case .Tie_End:
 			// Tie_End must be preceded by a Note token in the same voice
 			if last_note_voice_index < 0 {
 				log.error("Tie_End token at line", token.line + 1, "not preceded by a Note token")
-				return .Invalid_Token
+				return {}, .Invalid_Token
 			}
 			if len(current_line_tokens[last_note_voice_index]) == 0 {
 				log.error("Tie_End token at line", token.line + 1, "not preceded by a Note token")
-				return .Invalid_Token
+				return {}, .Invalid_Token
 			}
 			// Set tie_end on the last note token added to this voice
 			last_note_index := len(current_line_tokens[last_note_voice_index]) - 1
@@ -127,7 +138,7 @@ parse_syntax :: proc(tokens: ^[dynamic]tokenize.Token_With_Kind) -> (
 
 		case .Voice_Separator:
 			current_voice_index += 1
-			last_note_voice_index = -1  // Reset when voice changes
+			last_note_voice_index = -1 // Reset when voice changes
 
 		case .Line_Break:
 			has_notes := false
@@ -183,3 +194,16 @@ parse_syntax :: proc(tokens: ^[dynamic]tokenize.Token_With_Kind) -> (
 	return tree, nil
 }
 
+// Cleanup function for integration tests
+// Deletes the records array and all nested dynamic arrays in Record_Data_Line
+cleanup_tree :: proc(tree: ^Syntax_Tree) {
+	for &record in tree.records {
+		if record.kind == .Data_Line {
+			data_line := &record.record.(Record_Data_Line)
+			for i in 0 ..< 4 {
+				delete(data_line.voice_tokens[i])
+			}
+		}
+	}
+	delete(tree.records)
+}

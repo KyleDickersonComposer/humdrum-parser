@@ -4,30 +4,42 @@ import "../parse_syntax"
 import "../parser"
 import "../tokenize"
 import "../types"
-import "core:encoding/json"
 import "core:encoding/uuid"
 import "core:fmt"
 import "core:log"
-import "core:os"
+import "core:mem/virtual"
 import "core:strings"
 import "core:unicode/utf8"
 
-build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
+build_ir :: proc(
+	tree: ^parse_syntax.Syntax_Tree,
+) -> (
 	json_struct: types.Music_IR_Json,
 	err: parser.Parse_Error,
 ) {
+	// Main arena is set in context.allocator (from main) - use for persistent data
+	// Scratch arena is in context.temp_allocator - use for temporary allocations
+
+	// Allocates UUID string in main arena (via context.allocator)
+	// Temporary buffer uses scratch allocator (no delete needed - arena handles it)
+	alloc_uuid_string :: proc() -> string {
+		id := uuid.generate_v4()
+		buf := make([]byte, 36, context.temp_allocator)
+		uuid.to_string_buffer(id, buf)
+		return strings.clone(transmute(string)buf) // Clone to main arena
+	}
+
+	// Dynamic arrays use main arena (via context.allocator) - will persist
 	voices := make([dynamic]types.Voice)
-	voice_index_to_voice_ID := make(map[int]string, 4)
-	defer delete(voice_index_to_voice_ID)
+	
+	// Map uses scratch allocator - temporary lookup, arena handles cleanup
+	voice_index_to_voice_ID := make(map[int]string, 4, context.temp_allocator)
 
 	for i in 0 ..< 4 {
 		voice_type := parser.voice_index_to_voice_type(i) or_return
 
-		id := uuid.generate_v4()
-		buf := make([]byte, 36)
-		uuid.to_string_buffer(id, buf)
-
-		voice_index_to_voice_ID[i] = transmute(string)buf
+		voice_id := alloc_uuid_string()
+		voice_index_to_voice_ID[i] = voice_id
 
 		is_bass := false
 		if voice_type == "bass" {
@@ -37,7 +49,7 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 		append(
 			&voices,
 			types.Voice {
-				ID = transmute(string)buf,
+				ID = voice_id,
 				type = voice_type,
 				voice_index_of_staff = i % 2,
 				is_CF = false,
@@ -49,29 +61,29 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 
 	staffs := make([dynamic]types.Staff)
 	for i in 0 ..< 2 {
-		id := uuid.generate_v4()
-		buf := make([]byte, 36)
-		uuid.to_string_buffer(id, buf)
-
-		clef := "treble"
+		clef := strings.clone("treble")
 		if i == 0 {
-			clef = "bass"
+			clef = strings.clone("bass")
 		}
 
-		voice_IDs: []string
+		voice_IDs := make([]string, 2, context.allocator)
 		if i == 0 {
-			voice_IDs = []string{voice_index_to_voice_ID[0], voice_index_to_voice_ID[1]}
+			voice_IDs[0] = voice_index_to_voice_ID[0]
+			voice_IDs[1] = voice_index_to_voice_ID[1]
 		} else if i == 1 {
-			voice_IDs = []string{voice_index_to_voice_ID[2], voice_index_to_voice_ID[3]}
+			voice_IDs[0] = voice_index_to_voice_ID[2]
+			voice_IDs[1] = voice_index_to_voice_ID[3]
 		} else {
 			log.error("only supports two staff Bach Chorales")
 			return json_struct, parser.Tokenizer_Error.Invalid_Staff_Count
 		}
 
+		staff_id := alloc_uuid_string()
+
 		append(
 			&staffs,
 			types.Staff {
-				ID = transmute(string)buf,
+				ID = staff_id,
 				staff_index = i,
 				clef = clef,
 				voice_IDs = voice_IDs,
@@ -79,17 +91,18 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 		)
 	}
 
-	id := uuid.generate_v4()
-	buf := make([]byte, 36)
-	uuid.to_string_buffer(id, buf)
+	staff_grp_id := alloc_uuid_string()
 	staff_grps := make([dynamic]types.Staff_Grp)
+	staff_def_IDs := make([]string, 2, context.allocator)
+	staff_def_IDs[0] = staffs[0].ID
+	staff_def_IDs[1] = staffs[1].ID
 	append(
 		&staff_grps,
 		types.Staff_Grp {
-			ID = transmute(string)buf,
-			staff_def_IDs = []string{staffs[0].ID, staffs[1].ID},
+			ID = staff_grp_id,
+			staff_def_IDs = staff_def_IDs,
 			parent_staff_grp_ID = "",
-			bracket_style = "brace",
+			bracket_style = strings.clone("brace"),
 		},
 	)
 
@@ -107,34 +120,40 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 	for record in tree.records {
 		switch record.kind {
 		case .Exclusive_Interpretation:
-			// Already handled, skip
+		// Already handled, skip
 
 		case .Comment:
-			// Comments ignored
+		// Comments ignored
 
 		case .Double_Bar:
-			// Double bars not currently handled
+		// Double bars not currently handled
 
 		case .Tandem_Interpretation:
 			tand := record.record.(parse_syntax.Record_Tandem_Interpretation)
 			if tand.code == "key" {
-				key = tand.value
+				if len(tand.value) > 0 {
+					key = strings.clone(tand.value)
+				}
 			} else if tand.code == "M" {
 				// Parse meter from value like "M4/4"
 				meter_str := tand.value
 				if strings.has_prefix(meter_str, "M") {
 					meter_str = meter_str[1:]
 				}
-				parts := strings.split(meter_str, "/")
-				defer delete(parts)
+				parts := strings.split(meter_str, "/", context.temp_allocator)
+				// No delete needed - scratch arena handles cleanup
 				if len(parts) == 2 {
 					if len(parts[0]) > 0 && len(parts[1]) > 0 {
-						meter.numerator = parser.convert_runes_to_int(utf8.string_to_runes(parts[0])) or_return
-						meter.denominator = parser.convert_runes_to_int(utf8.string_to_runes(parts[1])) or_return
+						meter.numerator = parser.convert_runes_to_int(
+							utf8.string_to_runes(parts[0]),
+						) or_return
+						meter.denominator = parser.convert_runes_to_int(
+							utf8.string_to_runes(parts[1]),
+						) or_return
 						if meter.numerator == 6 || meter.numerator == 9 || meter.numerator == 12 {
-							meter.type = "compound"
+							meter.type = strings.clone("compound")
 						} else {
-							meter.type = "simple"
+							meter.type = strings.clone("simple")
 						}
 					}
 				}
@@ -156,13 +175,15 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 				has_changed = true
 			}
 
+			staff_grp_IDs := make([]string, 1, context.allocator)
+			staff_grp_IDs[0] = staff_grps[0].ID
 			append(
 				&bar_data_tokens,
 				types.Layout {
 					bar_number = bar.bar_number,
 					key = key,
 					has_layout_changed = has_changed,
-					staff_grp_IDs = []string{staff_grps[0].ID},
+					staff_grp_IDs = staff_grp_IDs,
 					meter = meter,
 				},
 			)
@@ -176,6 +197,8 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 			data_line := record.record.(parse_syntax.Record_Data_Line)
 
 			if current_bar == 0 && len(bar_data_tokens) == 0 {
+				staff_grp_IDs := make([]string, 1, context.allocator)
+				staff_grp_IDs[0] = staff_grps[0].ID
 				append(
 					&bar_data_tokens,
 					types.Layout {
@@ -183,7 +206,7 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 						has_layout_changed = true,
 						key = key,
 						meter = meter,
-						staff_grp_IDs = []string{staff_grps[0].ID},
+						staff_grp_IDs = staff_grp_IDs,
 					},
 				)
 			}
@@ -208,30 +231,39 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 
 					// Skip if note_name is empty or doesn't start with a valid note letter
 					if note_name == "" {
-						log.info("Skipping note token with empty note_name at bar", current_bar, "voice", voice_index)
+						log.info(
+							"Skipping note token with empty note_name at bar",
+							current_bar,
+							"voice",
+							voice_index,
+						)
 						continue
 					}
-					
+
 					// Check if first character is a valid note name
 					note_name_runes := utf8.string_to_runes(note_name)
-					defer delete(note_name_runes)
+					// No delete needed - scratch arena handles cleanup
 					if len(note_name_runes) == 0 || !parser.is_note_name_rune(note_name_runes[0]) {
-						log.info("Skipping note token with invalid note_name:", note_name, "at bar", current_bar, "voice", voice_index)
+						log.info(
+							"Skipping note token with invalid note_name:",
+							note_name,
+							"at bar",
+							current_bar,
+							"voice",
+							voice_index,
+						)
 						continue
 					}
 
 					corrected_accidental := ""
 					if accid != "" {
-						corrected_accidental = tokenize.convert_humdrum_accidentals_to_normal_accidentals(accid) or_return
+						corrected_accidental =
+							tokenize.convert_humdrum_accidentals_to_normal_accidentals(
+								accid,
+							) or_return
 					}
 
-					note_id := uuid.generate_v4()
-					buf := make([]byte, 36)
-					uuid.to_string_buffer(note_id, buf)
-
-					fermata_id := uuid.generate_v4()
-					fermata_buf := make([]byte, 36)
-					uuid.to_string_buffer(note_id, fermata_buf)
+					note_id := alloc_uuid_string()
 
 					fermata_staff_ID := ""
 					if voice_index > 2 {
@@ -241,15 +273,16 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 					}
 
 					if note_token.has_fermata {
+						fermata_id := alloc_uuid_string()
 						append(
 							&artifacts,
 							types.Fermata {
 								type = "fermata",
-								ID = transmute(string)fermata_buf,
+								ID = fermata_id,
 								place = "above",
 								bar_number = current_bar,
 								staff = fermata_staff_ID,
-								start_ID = transmute(string)buf,
+								start_ID = note_id,
 							},
 						)
 					}
@@ -269,10 +302,10 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 
 					duration_as_float := parser.get_duration_as_float(duration_as_int) or_return
 
-					full_note_name := fmt.aprintf("%v%v", note_name, accid)
-					defer delete(full_note_name)
+					full_note_name := fmt.aprintf("%v%v", note_name, accid, allocator = context.temp_allocator)
+					// No delete needed - scratch arena handles cleanup
 
-					note.ID = transmute(string)buf
+					note.ID = note_id
 					note.duration = parser.get_duration_as_string(duration_as_int) or_return
 					note.is_rest = false
 					note.input_octave = 4 + note_repeat_count
@@ -324,29 +357,5 @@ build_ir :: proc(tree: ^parse_syntax.Syntax_Tree) -> (
 
 	json_struct.metadata = meta
 
-	opts := json.Marshal_Options {
-		pretty = true,
-	}
-
-	json_music_IR, json_err := json.marshal(json_struct, opts)
-	if json_err != nil {
-		log.error(json_err)
-		return json_struct, parser.Conversion_Error.Json_Serialization_Failed
-	}
-
-	file_name := fmt.aprintf(
-		"tmp/chorale-%v-%v",
-		meta.publisher_catalog_number,
-		meta.catalog_number,
-	)
-	defer delete(file_name)
-
-	write_file_err := os.write_entire_file_or_err(file_name, json_music_IR)
-	if write_file_err != nil {
-		log.error(write_file_err)
-		return json_struct, parser.Conversion_Error.Failed_To_Write_File
-	}
-
 	return json_struct, nil
 }
-
