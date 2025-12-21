@@ -2,20 +2,12 @@
 
 A parser for the Humdrum music notation format, specifically designed for parsing Bach chorales into a structured JSON representation. Built in Odin.
 
-## Features
-
-- **Tokenization**: Converts raw Humdrum text into a stream of tokens
-- **Syntax Parsing**: Builds an Abstract Syntax Tree (AST) from tokens
-- **IR Generation**: Converts AST into a structured Intermediate Representation (IR) with metadata, voices, staffs, notes, and layouts
-- **Memory Management**: Uses arena allocators for efficient memory management
-- **Comprehensive Testing**: Separate integration tests for each phase
-
 ## Architecture
 
 The parser uses a three-phase architecture:
 
 1. **Tokenization** (`tokenize/`) - Converts raw Humdrum text into tokens
-2. **Syntax Parsing** (`parse_syntax/`) - Builds an AST from tokens
+2. **Syntax Parsing** (`parser/`) - Builds an AST from tokens
 3. **IR Building** (`build_ir/`) - Generates structured IR from AST
 
 ## Building
@@ -44,8 +36,6 @@ make build-dll-windows  # Windows (.dll) - run on Windows
 make test
 ```
 
-**Note**: Cross-compilation is not supported by Odin. Platform-specific build commands must be run on their respective platforms.
-
 ### Building as Shared Library
 
 To build as a shared library for use in other projects, use the platform-specific targets on their native platforms:
@@ -65,13 +55,48 @@ The shared library can then be linked into other projects that need to use the p
 
 ## Usage
 
-### As a Library
+The parser can be used from any language that can call C functions. It provides a C-compatible API through the shared library, as well as Python bindings.
 
-The parser can be used as a library in other Odin projects. The main API consists of three functions:
+### C API (Any Language)
+
+The shared library exposes a C API that can be called from any language (C, C++, Python, Go, Rust, etc.):
+
+```c
+// Parse Humdrum string and get JSON result
+cstring json_result;
+int err_code = Parse_Humdrum_String_To_JSON(humdrum_data, &json_result);
+if (err_code == 0) {
+    // Use json_result (allocated in library, persists until next call)
+    printf("%s\n", json_result);
+}
+```
+
+The library provides two main functions:
+- `Parse_Humdrum_String_To_JSON` - Parses a Humdrum string and returns JSON as a C string
+- `Parse_Humdrum_String` - Parses a Humdrum string and fills a C struct
+
+See `lib/api.odin` for the full API definition.
+
+### Python Bindings
+
+Python bindings are available in the `python/` directory:
+
+```python
+from humdrum_parser import parse_humdrum
+
+result = parse_humdrum(humdrum_data)
+# Returns a Python dict with the parsed music IR
+```
+
+See `python/README.md` for more details.
+
+### Odin Library
+
+The parser can also be used directly as an Odin library:
 
 ```odin
 import "humdrum-parser/tokenize"
-import "humdrum-parser/parse_syntax"
+import "humdrum-parser/parser"
 import "humdrum-parser/build_ir"
 
 // Phase 1: Tokenize
@@ -81,11 +106,10 @@ if err != nil {
 }
 
 // Phase 2: Parse syntax
-tree, err := parse_syntax.parse_syntax(&tokens)
+tree, err := parser.parse(&tokens)
 if err != nil {
     // handle error
 }
-defer parse_syntax.cleanup_tree(&tree)
 
 // Phase 3: Build IR
 ir, err := build_ir.build_ir(&tree)
@@ -94,24 +118,7 @@ if err != nil {
 }
 ```
 
-### Memory Management
-
-The parser uses arena allocators for memory management. You must set up the context before calling parser functions:
-
-```odin
-import "core:mem/virtual"
-
-main_arena: virtual.Arena
-virtual.arena_init_growing(&main_arena)
-defer virtual.arena_destroy(&main_arena)
-
-scratch_arena: virtual.Arena
-virtual.arena_init_growing(&scratch_arena)
-defer virtual.arena_destroy(&scratch_arena)
-
-context.allocator = virtual.arena_allocator(&main_arena)
-context.temp_allocator = virtual.arena_allocator(&scratch_arena)
-```
+**Note**: When using as an Odin library, you must set up arena allocators for memory management. See the Odin documentation for details.
 
 
 ## Project Structure
@@ -119,9 +126,8 @@ context.temp_allocator = virtual.arena_allocator(&scratch_arena)
 ```
 humdrum-parser/
 ├── build_ir/          # IR generation from AST
-├── parse_syntax/       # Syntax parsing (AST building)
+├── parser/            # Syntax parsing (AST building) and shared utilities
 ├── tokenize/          # Tokenization
-├── parser/            # Shared parser utilities and types
 ├── types/             # Type definitions
 ├── tests/             # Integration tests
 ├── main.odin          # Example main program

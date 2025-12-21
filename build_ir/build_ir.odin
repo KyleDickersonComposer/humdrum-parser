@@ -1,6 +1,5 @@
 package build_ir
 
-import "../parse_syntax"
 import "../parser"
 import "../tokenize"
 import "../types"
@@ -12,7 +11,7 @@ import "core:strings"
 import "core:unicode/utf8"
 
 build_ir :: proc(
-	tree: ^parse_syntax.Syntax_Tree,
+	tree: ^parser.Syntax_Tree,
 ) -> (
 	json_struct: types.Music_IR_Json,
 	err: parser.Parse_Error,
@@ -20,8 +19,7 @@ build_ir :: proc(
 	// Main arena is set in context.allocator (from main) - use for persistent data
 	// Scratch arena is in context.temp_allocator - use for temporary allocations
 
-	// Allocates UUID string in main arena (via context.allocator)
-	// Temporary buffer uses scratch allocator (no delete needed - arena handles it)
+	// Temporary buffer uses scratch allocator
 	alloc_uuid_string :: proc() -> string {
 		id := uuid.generate_v4()
 		buf := make([]byte, 36, context.temp_allocator)
@@ -29,9 +27,8 @@ build_ir :: proc(
 		return strings.clone(transmute(string)buf) // Clone to main arena
 	}
 
-	// Dynamic arrays use main arena (via context.allocator) - will persist
 	voices := make([dynamic]types.Voice)
-	
+
 	// Map uses scratch allocator - temporary lookup, arena handles cleanup
 	voice_index_to_voice_ID := make(map[int]string, 4, context.temp_allocator)
 
@@ -66,7 +63,7 @@ build_ir :: proc(
 			clef = strings.clone("bass")
 		}
 
-		voice_IDs := make([]string, 2, context.allocator)
+		voice_IDs := make([]string, 2)
 		if i == 0 {
 			voice_IDs[0] = voice_index_to_voice_ID[0]
 			voice_IDs[1] = voice_index_to_voice_ID[1]
@@ -82,18 +79,13 @@ build_ir :: proc(
 
 		append(
 			&staffs,
-			types.Staff {
-				ID = staff_id,
-				staff_index = i,
-				clef = clef,
-				voice_IDs = voice_IDs,
-			},
+			types.Staff{ID = staff_id, staff_index = i, clef = clef, voice_IDs = voice_IDs},
 		)
 	}
 
 	staff_grp_id := alloc_uuid_string()
 	staff_grps := make([dynamic]types.Staff_Grp)
-	staff_def_IDs := make([]string, 2, context.allocator)
+	staff_def_IDs := make([]string, 2)
 	staff_def_IDs[0] = staffs[0].ID
 	staff_def_IDs[1] = staffs[1].ID
 	append(
@@ -129,7 +121,7 @@ build_ir :: proc(
 		// Double bars not currently handled
 
 		case .Tandem_Interpretation:
-			tand := record.record.(parse_syntax.Record_Tandem_Interpretation)
+			tand := record.record.(parser.Record_Tandem_Interpretation)
 			if tand.code == "key" {
 				if len(tand.value) > 0 {
 					// Check if it's key signature notation (e.g., "[f#]") or key name (e.g., "G:")
@@ -168,7 +160,7 @@ build_ir :: proc(
 			}
 
 		case .Reference:
-			ref := record.record.(parse_syntax.Record_Reference)
+			ref := record.record.(parser.Record_Reference)
 			if ref.code == .Scholarly_Catalog_Number {
 				meta.catalog_number = ref.data
 			}
@@ -177,7 +169,7 @@ build_ir :: proc(
 			}
 
 		case .Bar_Line:
-			bar := record.record.(parse_syntax.Record_Bar_Line)
+			bar := record.record.(parser.Record_Bar_Line)
 			has_changed := false
 			if bar.bar_number == 1 && len(bar_data_tokens) == 0 {
 				has_changed = true
@@ -185,7 +177,9 @@ build_ir :: proc(
 
 			// If first barline is =1 and we have bar 0 notes all at timestamp 1.0,
 			// they're not a pickup - reassign them to bar 1
-			if bar.bar_number == 1 && len(bar_data_tokens) > 0 && bar_data_tokens[0].bar_number == 0 {
+			if bar.bar_number == 1 &&
+			   len(bar_data_tokens) > 0 &&
+			   bar_data_tokens[0].bar_number == 0 {
 				// Check if all notes in bar 0 are at timestamp 1.0 (not a pickup)
 				all_at_timestamp_one := true
 				for &note in note_data_tokens {
@@ -194,17 +188,17 @@ build_ir :: proc(
 						break
 					}
 				}
-				
+
 				// If all notes are at timestamp 1.0, remove bar 0 and reassign notes to bar 1
 				if all_at_timestamp_one {
 					// Remove bar 0 layout (remove first element from dynamic array)
 					// Create new array without first element
-					new_bar_tokens := make([dynamic]types.Layout, 0, len(bar_data_tokens) - 1, context.allocator)
-					for i in 1..<len(bar_data_tokens) {
+					new_bar_tokens := make([dynamic]types.Layout, 0, len(bar_data_tokens) - 1)
+					for i in 1 ..< len(bar_data_tokens) {
 						append(&new_bar_tokens, bar_data_tokens[i])
 					}
 					bar_data_tokens = new_bar_tokens
-					
+
 					// Reassign notes from bar 0 to bar 1
 					for &note in note_data_tokens {
 						if note.bar_number == 0 {
@@ -217,7 +211,7 @@ build_ir :: proc(
 				}
 			}
 
-			staff_grp_IDs := make([]string, 1, context.allocator)
+			staff_grp_IDs := make([]string, 1)
 			staff_grp_IDs[0] = staff_grps[0].ID
 			append(
 				&bar_data_tokens,
@@ -236,21 +230,21 @@ build_ir :: proc(
 			}
 
 		case .Data_Line:
-			data_line := record.record.(parse_syntax.Record_Data_Line)
+			data_line := record.record.(parser.Record_Data_Line)
 
 			if current_bar == 0 && len(bar_data_tokens) == 0 {
 				// Meter should already be set from tandem interpretation before data lines
 				// If not set, we'll update bar 0's meter when we hit bar 1
-				staff_grp_IDs := make([]string, 1, context.allocator)
+				staff_grp_IDs := make([]string, 1)
 				staff_grp_IDs[0] = staff_grps[0].ID
 				append(
 					&bar_data_tokens,
 					types.Layout {
-						bar_number = 0,
+						bar_number         = 0,
 						has_layout_changed = true,
-						key = key,
-						meter = meter, // Same meter as bar 1 (will be updated if not set yet)
-						staff_grp_IDs = staff_grp_IDs,
+						key                = key,
+						meter              = meter, // Same meter as bar 1 (will be updated if not set yet)
+						staff_grp_IDs      = staff_grp_IDs,
 					},
 				)
 			}
@@ -346,7 +340,12 @@ build_ir :: proc(
 
 					duration_as_float := parser.get_duration_as_float(duration_as_int) or_return
 
-					full_note_name := fmt.aprintf("%v%v", note_name, accid, allocator = context.temp_allocator)
+					full_note_name := fmt.aprintf(
+						"%v%v",
+						note_name,
+						accid,
+						allocator = context.temp_allocator,
+					)
 					// No delete needed - scratch arena handles cleanup
 
 					note.ID = note_id

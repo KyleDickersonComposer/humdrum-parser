@@ -60,17 +60,17 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 	for token in tokens {
 		#partial switch token.kind {
 		case .Note:
-			note := token.token.(tokenize.Token_Note)
+			note := token.token.(parser.Token_Note)
 			testing.expect(t, len(note.note_name) > 0, "Note name should not be empty")
 			note_count += 1
 		case .Reference_Record:
 			ref_count += 1
 		case .Exclusive_Interpretation:
-			excl := token.token.(tokenize.Token_Exclusive_Interpretation)
+			excl := token.token.(parser.Token_Exclusive_Interpretation)
 			testing.expect_value(t, excl.spine_type, "kern")
 			excl_count += 1
 		case .Tandem_Interpretation:
-			tand := token.token.(tokenize.Token_Tandem_Interpretation)
+			tand := token.token.(parser.Token_Tandem_Interpretation)
 			// Verify we have ICvox and Meter tandem interpretations
 			testing.expect(
 				t,

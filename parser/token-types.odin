@@ -1,6 +1,4 @@
-package tokenize
-
-import "../parser"
+package parser
 
 Token_Kind :: enum {
 	Exclusive_Interpretation,
@@ -30,7 +28,7 @@ Token_Tandem_Interpretation :: struct {
 }
 
 Token_Reference_Record :: struct {
-	code: parser.Valid_Record_Code,
+	code: Valid_Record_Code,
 	data: string,
 	line: int,
 }
@@ -64,15 +62,15 @@ Token_Rest :: struct {
 	line:     int,
 }
 
-Token_Double_Bar :: struct {
-	line: int,
-}
-
 Token_Tie_Start :: struct {
 	line: int,
 }
 
 Token_Tie_End :: struct {
+	line: int,
+}
+
+Token_Double_Bar :: struct {
 	line: int,
 }
 

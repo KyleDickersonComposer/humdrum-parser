@@ -1,6 +1,6 @@
 package tests
 
-import "../parse_syntax"
+import "../parser"
 import "../tokenize"
 import "core:mem/virtual"
 import "core:testing"
@@ -63,8 +63,7 @@ test_ast_parsing_integration :: proc(t: ^testing.T) {
 	testing.expect_value(t, token_err, nil)
 
 	// Step 2: Parse AST (this is what we're testing)
-	tree, parse_err := parse_syntax.parse_syntax(&tokens)
-	defer parse_syntax.cleanup_tree(&tree)
+	tree, parse_err := parser.parse(&tokens)
 	testing.expect_value(t, parse_err, nil)
 	
 	// Validate AST structure

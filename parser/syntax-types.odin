@@ -1,7 +1,4 @@
-package parse_syntax
-
-import "../tokenize"
-import "../parser"
+package parser
 
 Record_Exclusive_Interpretation :: struct {
 	spine_type: string,
@@ -13,7 +10,7 @@ Record_Tandem_Interpretation :: struct {
 }
 
 Record_Reference :: struct {
-	code: parser.Valid_Record_Code,
+	code: Valid_Record_Code,
 	data: string,
 }
 
@@ -29,7 +26,7 @@ Record_Double_Bar :: struct {
 }
 
 Record_Data_Line :: struct {
-	voice_tokens: [4][dynamic]tokenize.Token_Note,
+	voice_tokens: [4][dynamic]Token_Note,
 }
 
 Record_Kind :: enum {

@@ -8,14 +8,14 @@ import "core:strings"
 import "core:unicode/utf8"
 
 tokenize :: proc(parse_data: ^[]rune) -> (
-	tokens: [dynamic]Token_With_Kind,
+	tokens: [dynamic]parser.Token_With_Kind,
 	err: parser.Parse_Error,
 ) {
 	// Main arena is set in context.allocator (from main) - use for persistent strings
 	// Scratch arena is in context.temp_allocator - use for temporary allocations
 	
 	// Tokens array uses main arena (needs to persist until after parse phase)
-	tokens = make([dynamic]Token_With_Kind, 0, context.allocator)
+	tokens = make([dynamic]parser.Token_With_Kind, 0, context.allocator)
 
 	p: parser.Parser
 	p.data = parse_data^
@@ -23,7 +23,7 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 	if len(p.data) > 0 {
 		p.current = p.data[0]
 	} else {
-		append(&tokens, Token_With_Kind{kind = .EOF, line = 0})
+		append(&tokens, parser.Token_With_Kind{kind = .EOF, line = 0})
 		return tokens, nil
 	}
 
@@ -50,9 +50,9 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 			// Emit Tie_Start token
 			append(
 				&tokens,
-				Token_With_Kind {
+				parser.Token_With_Kind {
 					kind = .Tie_Start,
-					token = Token_Tie_Start{line = p.line_count},
+					token = parser.Token_Tie_Start{line = p.line_count},
 					line = p.line_count,
 				},
 			)
@@ -71,7 +71,7 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 		case '\t':
 			append(
 				&tokens,
-				Token_With_Kind {
+				parser.Token_With_Kind {
 					kind = .Voice_Separator,
 					token = nil,
 					line = p.line_count,
@@ -84,9 +84,9 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 			// Emit Tie_End token
 			append(
 				&tokens,
-				Token_With_Kind {
+				parser.Token_With_Kind {
 					kind = .Tie_End,
-					token = Token_Tie_End{line = p.line_count},
+					token = parser.Token_Tie_End{line = p.line_count},
 					line = p.line_count,
 				},
 			)
@@ -100,7 +100,7 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 		case '\n':
 			append(
 				&tokens,
-				Token_With_Kind {
+				parser.Token_With_Kind {
 					kind = .Line_Break,
 					token = nil,
 					line = p.line_count,
@@ -123,7 +123,7 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 		case utf8.RUNE_EOF:
 			append(
 				&tokens,
-				Token_With_Kind {
+				parser.Token_With_Kind {
 					kind = .EOF,
 					token = nil,
 					line = p.line_count,
@@ -148,7 +148,7 @@ tokenize :: proc(parse_data: ^[]rune) -> (
 
 // Cleanup function for integration tests
 // Tokens array uses default allocator, so it can be safely deleted
-cleanup_tokens :: proc(tokens: ^[dynamic]Token_With_Kind) {
+cleanup_tokens :: proc(tokens: ^[dynamic]parser.Token_With_Kind) {
 	delete(tokens^)
 }
 

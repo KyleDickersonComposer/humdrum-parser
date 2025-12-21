@@ -1,7 +1,7 @@
 package tests
 
 import "../build_ir"
-import "../parse_syntax"
+import "../parser"
 import "../tokenize"
 import "core:crypto"
 import "core:mem/virtual"
@@ -67,8 +67,7 @@ test_ir_building_integration :: proc(t: ^testing.T) {
 	testing.expect_value(t, token_err, nil)
 
 	// Step 2: Parse AST (prerequisite)
-	tree, parse_err := parse_syntax.parse_syntax(&tokens)
-	defer parse_syntax.cleanup_tree(&tree)
+	tree, parse_err := parser.parse(&tokens)
 	testing.expect_value(t, parse_err, nil)
 	
 	// Reset scratch arena after parse

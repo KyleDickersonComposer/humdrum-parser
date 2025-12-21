@@ -1,7 +1,6 @@
 package lib
 
 import "../build_ir"
-import "../parse_syntax"
 import "../parser"
 import "../tokenize"
 import "../types"
@@ -103,11 +102,10 @@ Parse_Humdrum_String :: proc "c" (
 	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
 
 	// Phase 2: Parse syntax
-	tree, parse_err := parse_syntax.parse_syntax(&tokens)
+	tree, parse_err := parser.parse(&tokens)
 	if parse_err != nil {
 		return parse_error_to_code(parse_err)
 	}
-	defer parse_syntax.cleanup_tree(&tree)
 
 	// Reset scratch arena after parsing
 	virtual.arena_destroy(&scratch_arena)
@@ -174,11 +172,10 @@ Parse_Humdrum_String_To_JSON :: proc "c" (
 	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
 
 	// Phase 2: Parse syntax
-	tree, parse_err := parse_syntax.parse_syntax(&tokens)
+	tree, parse_err := parser.parse(&tokens)
 	if parse_err != nil {
 		return parse_error_to_code(parse_err)
 	}
-	defer parse_syntax.cleanup_tree(&tree)
 
 	// Reset scratch arena after parsing
 	virtual.arena_destroy(&scratch_arena)
