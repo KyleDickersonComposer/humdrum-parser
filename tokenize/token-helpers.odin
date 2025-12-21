@@ -335,8 +335,8 @@ classify_tandem_interpretation :: proc(
 	return .Unknown, nil
 }
 
-// Parse a single valid tandem interpretation code (one spine)
-parse_single_valid_tandem_code :: proc(
+// Parse a valid tandem interpretation code (one spine)
+parse_valid_tandem_code :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]parser.Token_With_Kind,
 	eated: ^[dynamic]rune,
@@ -412,8 +412,8 @@ parse_single_valid_tandem_code :: proc(
 	return nil
 }
 
-// Parse a single key tandem interpretation (one spine)
-parse_single_key_tandem :: proc(
+// Parse a key tandem interpretation (one spine)
+parse_key_tandem :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]parser.Token_With_Kind,
 	eated: ^[dynamic]rune,
@@ -430,7 +430,7 @@ parse_single_key_tandem :: proc(
 	}
 
 	// Extract key - handle *a: format (note name keys)
-	// k[] patterns are handled in parse_single_valid_tandem_code
+	// k[] patterns are handled in parse_valid_tandem_code
 	if len(ti_code) > 0 {
 		out_buffer := ""
 		// Format: *a: - remove ':' if present, pass note name
@@ -462,8 +462,8 @@ parse_single_key_tandem :: proc(
 	return nil
 }
 
-// Parse a single meter tandem interpretation (one spine)
-parse_single_meter_tandem :: proc(
+// Parse a meter tandem interpretation (one spine)
+parse_meter_tandem :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]parser.Token_With_Kind,
 	eated: ^[dynamic]rune,
@@ -522,132 +522,12 @@ parse_single_meter_tandem :: proc(
 	return nil
 }
 
-// Parse a meter tandem interpretation (DEPRECATED - use parse_single_meter_tandem)
-parse_meter_tandem :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
-	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
-	// Parse each spine on the line (tab-separated)
-	for {
-		// Eat the asterisk
-		_, _ = parse_repeating_rune(p) or_return
-
-		// Get the code
-		ti_code := make([dynamic]rune)
-		defer delete(ti_code)
-		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
-			append(&ti_code, p.current)
-			parser.eat(p)
-		}
-
-		// Parse meter (M<numerator>/<denominator>)
-		if len(ti_code) > 1 {
-			without_m := ti_code[1:]
-			slice_index := -1
-			for r, i in without_m {
-				if r == '/' {
-					slice_index = i
-					break
-				}
-			}
-
-			if slice_index == -1 {
-				log.error(
-					"Invalid meter format: expected M<numerator>/<denominator> (e.g., M4/4), but found:",
-					utf8.runes_to_string(ti_code[:]),
-					"at line:",
-					p.line_count + 1,
-				)
-				return parser.Tokenizer_Error.Invalid_Token
-			} else {
-				numerator_runes := without_m[:slice_index]
-				if len(numerator_runes) > 0 {
-					numerator := parser.convert_runes_to_int(numerator_runes) or_return
-
-					without_slash := without_m[slice_index + 1:]
-					denom_slice_index := len(without_slash)
-					for r, i in without_slash {
-						if r == '\t' || r == ':' {
-							denom_slice_index = i
-							break
-						}
-					}
-
-					denominator_runes := without_slash[:denom_slice_index]
-					if len(denominator_runes) > 0 {
-						denominator := parser.convert_runes_to_int(denominator_runes) or_return
-						meter_value := fmt.aprintf("%v/%v", numerator, denominator)
-						// Note: Don't defer delete here - the string is stored in the token
-
-						append(
-							tokens,
-							parser.Token_With_Kind {
-								kind = .Tandem_Interpretation,
-								token = parser.Token_Tandem_Interpretation {
-									code = "Meter",
-									value = meter_value,
-									line = p.line_count,
-								},
-								line = p.line_count,
-							},
-						)
-					}
-				}
-			}
-		}
-
-		// If we hit a tab, continue to next spine; if newline, we're done
-		if p.current == '\t' {
-			parser.eat(p) // Eat the tab
-			continue
-		} else {
-			// Newline or EOF - done with this line
-			break
-		}
-	}
-	return nil
-}
-
-// Parse a single unknown/unsupported tandem interpretation (one spine)
-parse_single_unknown_tandem :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
-	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
-	// Eat the asterisk
-	_, _ = parse_repeating_rune(p) or_return
-
-	// Get the code for logging
-	ti_code := make([dynamic]rune)
-	defer delete(ti_code)
-	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
-		append(&ti_code, p.current)
-		parser.eat(p)
-	}
-	ti_code_string := utf8.runes_to_string(ti_code[:])
-
-	if len(ti_code_string) > 0 {
-		log.warn(
-			"Unsupported tandem interpretation code:",
-			ti_code_string,
-			"at line:",
-			p.line_count + 1,
-			"- ignoring (not in valid codes map)",
-		)
-	}
-
-	return nil
-}
-
-// Parse an unknown/unsupported tandem interpretation (DEPRECATED - use parse_single_unknown_tandem)
+// Parse an unknown/unsupported tandem interpretation (one spine)
 parse_unknown_tandem :: proc(
 	p: ^parser.Parser,
 	tokens: ^[dynamic]parser.Token_With_Kind,
 	eated: ^[dynamic]rune,
 ) -> parser.Parse_Error {
-	// Parse each spine on the line (tab-separated)
-	for {
 		// Eat the asterisk
 		_, _ = parse_repeating_rune(p) or_return
 
@@ -670,15 +550,6 @@ parse_unknown_tandem :: proc(
 			)
 		}
 
-		// If we hit a tab, continue to next spine; if newline, we're done
-		if p.current == '\t' {
-			parser.eat(p) // Eat the tab
-			continue
-		} else {
-			// Newline or EOF - done with this line
-			break
-		}
-	}
 	return nil
 }
 
@@ -799,16 +670,16 @@ parse_asterisk_line :: proc(
 			switch ti_type {
 			case .Valid_Code:
 				// Parse just this spine (will consume until tab or newline)
-				parse_single_valid_tandem_code(p, tokens, eated) or_return
+				parse_valid_tandem_code(p, tokens, eated) or_return
 			case .Key:
 				// Parse just this spine (will consume until tab or newline)
-				parse_single_key_tandem(p, tokens, eated) or_return
+				parse_key_tandem(p, tokens, eated) or_return
 			case .Meter:
 				// Parse just this spine (will consume until tab or newline)
-				parse_single_meter_tandem(p, tokens, eated) or_return
+				parse_meter_tandem(p, tokens, eated) or_return
 			case .Unknown:
 				// Parse just this spine (will consume until tab or newline)
-				parse_single_unknown_tandem(p, tokens, eated) or_return
+				parse_unknown_tandem(p, tokens, eated) or_return
 			}
 
 			// If we hit a tab, continue to next spine; if newline, we're done
