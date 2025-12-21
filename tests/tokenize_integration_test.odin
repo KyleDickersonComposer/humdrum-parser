@@ -1,14 +1,15 @@
 package tests
 
 import "../parser"
-import "../tokenize"
+import "../tokenizer"
+import "../types"
 import "core:fmt"
 import "core:mem/virtual"
 import "core:testing"
 import "core:unicode/utf8"
 
 // Integration test for tokenizer
-// Tests the full tokenization flow including cleanup
+// Tests the full tokenization flow
 @(test)
 test_tokenize_integration :: proc(t: ^testing.T) {
 	// Setup arenas like main() does
@@ -44,8 +45,7 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 	parse_data := utf8.string_to_runes(data)
 	defer delete(parse_data)
 
-	tokens, err := tokenize.tokenize(&parse_data)
-	defer tokenize.cleanup_tokens(&tokens)
+	tokens, err := tokenizer.tokenize(&parse_data)
 
 	testing.expect_value(t, err, nil)
 
@@ -60,17 +60,17 @@ test_tokenize_integration :: proc(t: ^testing.T) {
 	for token in tokens {
 		#partial switch token.kind {
 		case .Note:
-			note := token.token.(parser.Token_Note)
+			note := token.token.(types.Token_Note)
 			testing.expect(t, len(note.note_name) > 0, "Note name should not be empty")
 			note_count += 1
 		case .Reference_Record:
 			ref_count += 1
 		case .Exclusive_Interpretation:
-			excl := token.token.(parser.Token_Exclusive_Interpretation)
+			excl := token.token.(types.Token_Exclusive_Interpretation)
 			testing.expect_value(t, excl.spine_type, "kern")
 			excl_count += 1
 		case .Tandem_Interpretation:
-			tand := token.token.(parser.Token_Tandem_Interpretation)
+			tand := token.token.(types.Token_Tandem_Interpretation)
 			// Verify we have ICvox and Meter tandem interpretations
 			testing.expect(
 				t,

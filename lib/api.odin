@@ -2,7 +2,7 @@ package lib
 
 import "../build_ir"
 import "../parser"
-import "../tokenize"
+import "../tokenizer"
 import "../types"
 import "base:runtime"
 import "core:crypto"
@@ -36,30 +36,81 @@ init_arenas :: proc() -> bool {
 	return true
 }
 
-// Convert Parse_Error to error code for C interop
-parse_error_to_code :: proc(err: parser.Parse_Error) -> i32 {
+// Convert Tokenizer_Error to error code for C interop
+tokenizer_error_to_code :: proc(err: types.Tokenizer_Error) -> i32 {
 	if err == nil {
 		return 0
 	}
-	
-	// Map Parse_Error union to unique error codes
-	// Using a simple offset-based approach
-	#partial switch e in err {
-	case parser.Tokenizer_Error:
-		return cast(i32)e + 1
-	case parser.Syntax_Error:
-		return cast(i32)e + 100
-	case parser.Conversion_Error:
-		return cast(i32)e + 200
-	case parser.Lookup_Error:
-		return cast(i32)e + 300
+	return cast(i32)err + 1
+}
+
+// Convert Parser_Error to error code for C interop
+parse_error_to_code :: proc(err: types.Parser_Error) -> i32 {
+	if err == nil {
+		return 0
+	}
+	// Map Parser_Error enum to unique error codes
+	// Syntax errors (0-3) map to 100-103
+	// Conversion errors (4-7) map to 200-204
+	// Lookup errors (8) map to 300-301
+	switch err {
+	case .None:
+		return 0
+	case .Malformed_Note:
+		return 101
+	case .Malformed_Accidental:
+		return 102
+	case .Malformed_Bar_Number:
+		return 103
+	case .Failed_To_Convert_To_Integer:
+		return 201
+	case .Failed_To_Convert_Duration:
+		return 202
+	case .Json_Serialization_Failed:
+		return 203
+	case .Failed_To_Write_File:
+		return 204
+	case .Key_Lookup_Failed:
+		return 301
+	}
+	return -1
+}
+
+// Convert Parsing_Error to error code for C interop
+parsing_error_to_code :: proc(err: types.Parsing_Error) -> i32 {
+	if err == nil {
+		return 0
+	}
+	// Map Parsing_Error enum to unique error codes
+	// Syntax errors (0-3) map to 100-103
+	// Conversion errors (4-7) map to 200-204
+	// Lookup errors (8) map to 300-301
+	switch err {
+	case .None:
+		return 0
+	case .Malformed_Note:
+		return 101
+	case .Malformed_Accidental:
+		return 102
+	case .Malformed_Bar_Number:
+		return 103
+	case .Failed_To_Convert_To_Integer:
+		return 201
+	case .Failed_To_Convert_Duration:
+		return 202
+	case .Json_Serialization_Failed:
+		return 203
+	case .Failed_To_Write_File:
+		return 204
+	case .Key_Lookup_Failed:
+		return 301
 	}
 	return -1
 }
 
 // Parse_Humdrum_String parses a Humdrum string and writes the result to out_ir
 // Returns: 0 on success, non-zero error code on failure
-// The error code corresponds to parser.Parse_Error enum values
+// The error code corresponds to types.Parser_Error enum values
 // out_ir can be nil if the caller doesn't need the result
 @(export)
 Parse_Humdrum_String :: proc "c" (
@@ -88,9 +139,9 @@ Parse_Humdrum_String :: proc "c" (
 	defer delete(parse_data)
 
 	// Phase 1: Tokenize
-	tokens, token_err := tokenize.tokenize(&parse_data)
+	tokens, token_err := tokenizer.tokenize(&parse_data)
 	if token_err != nil {
-		return parse_error_to_code(token_err)
+		return tokenizer_error_to_code(token_err)
 	}
 
 	// Reset scratch arena after tokenization
@@ -118,7 +169,18 @@ Parse_Humdrum_String :: proc "c" (
 	// Phase 3: Build IR
 	result, build_err := build_ir.build_ir(&tree)
 	if build_err != nil {
-		return parse_error_to_code(build_err)
+		switch e in build_err {
+		case types.Parser_Error:
+			return parse_error_to_code(e)
+		case types.Parsing_Error:
+			return parsing_error_to_code(e)
+		case types.Tokenizer_Error:
+			return tokenizer_error_to_code(e)
+		case types.Build_IR_Error:
+			// Map Build_IR_Error to codes starting at 400 to avoid conflicts
+			return cast(i32)e + 400
+		}
+		return -1
 	}
 	if out_ir != nil {
 		out_ir[0] = result
@@ -158,9 +220,9 @@ Parse_Humdrum_String_To_JSON :: proc "c" (
 	defer delete(parse_data)
 
 	// Phase 1: Tokenize
-	tokens, token_err := tokenize.tokenize(&parse_data)
+	tokens, token_err := tokenizer.tokenize(&parse_data)
 	if token_err != nil {
-		return parse_error_to_code(token_err)
+		return tokenizer_error_to_code(token_err)
 	}
 
 	// Reset scratch arena after tokenization
@@ -188,7 +250,18 @@ Parse_Humdrum_String_To_JSON :: proc "c" (
 	// Phase 3: Build IR
 	result, build_err := build_ir.build_ir(&tree)
 	if build_err != nil {
-		return parse_error_to_code(build_err)
+		switch e in build_err {
+		case types.Parser_Error:
+			return parse_error_to_code(e)
+		case types.Parsing_Error:
+			return parsing_error_to_code(e)
+		case types.Tokenizer_Error:
+			return tokenizer_error_to_code(e)
+		case types.Build_IR_Error:
+			// Map Build_IR_Error to codes starting at 400 to avoid conflicts
+			return cast(i32)e + 400
+		}
+		return -1
 	}
 	
 	// Serialize to JSON
@@ -197,7 +270,7 @@ Parse_Humdrum_String_To_JSON :: proc "c" (
 	}
 	json_bytes, json_err := json.marshal(result, opts)
 	if json_err != nil {
-		return parse_error_to_code(parser.Parse_Error(parser.Conversion_Error.Json_Serialization_Failed))
+		return parse_error_to_code(.Json_Serialization_Failed)
 	}
 	
 	// Convert to C string (allocated in main arena)

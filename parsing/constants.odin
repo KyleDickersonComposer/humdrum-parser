@@ -1,4 +1,4 @@
-package parser
+package parsing
 
 NOTE_NAMES :: []rune{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'a', 'b', 'c', 'd', 'e', 'f', 'g'}
 
@@ -25,3 +25,4 @@ E_FLAT_SCALE :: [7]string{"Eb", "F", "G", "Ab", "Bb", "C", "D"}
 G_FLAT_SCALE :: [7]string{"Gb", "Ab", "Bb", "Cb", "Db", "Eb", "F"}
 A_FLAT_SCALE :: [7]string{"Ab", "Bb", "C", "Db", "Eb", "F", "G"}
 B_FLAT_SCALE :: [7]string{"Bb", "C", "D", "Eb", "F", "G", "A"}
+

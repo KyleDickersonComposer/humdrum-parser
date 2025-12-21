@@ -2,7 +2,7 @@ package tests
 
 import "../build_ir"
 import "../parser"
-import "../tokenize"
+import "../tokenizer"
 import "core:crypto"
 import "core:mem/virtual"
 import "core:testing"
@@ -62,8 +62,7 @@ test_ir_building_integration :: proc(t: ^testing.T) {
 	}
 	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
 
-	tokens, token_err := tokenize.tokenize(&parse_data)
-	defer tokenize.cleanup_tokens(&tokens)
+	tokens, token_err := tokenizer.tokenize(&parse_data)
 	testing.expect_value(t, token_err, nil)
 
 	// Step 2: Parse AST (prerequisite)

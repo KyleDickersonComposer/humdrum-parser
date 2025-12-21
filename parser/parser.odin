@@ -1,17 +1,18 @@
 package parser
 
+import "../types"
 import "core:log"
 
 parse :: proc(
-	tokens: ^[dynamic]Token_With_Kind,
+	tokens: ^[dynamic]types.Token_With_Kind,
 ) -> (
-	tree: Syntax_Tree,
-	err: Parse_Error,
+	tree: types.Syntax_Tree,
+	err: types.Parser_Error,
 ) {
-	tree.records = make([dynamic]Record_With_Kind)
+	tree.records = make([dynamic]types.Record_With_Kind)
 
 	token_index := 0
-	current_line_tokens: [4][dynamic]Token_Note
+	current_line_tokens: [4][dynamic]types.Token_Note
 	current_voice_index := 0
 	last_note_voice_index := -1 // Track which voice the last note was added to
 
@@ -20,56 +21,59 @@ parse :: proc(
 
 		switch token.kind {
 		case .Exclusive_Interpretation:
-			excl := token.token.(Token_Exclusive_Interpretation)
+			excl := token.token.(types.Token_Exclusive_Interpretation)
 			append(
 				&tree.records,
-				Record_With_Kind {
+				types.Record_With_Kind {
 					kind = .Exclusive_Interpretation,
-					record = Record_Exclusive_Interpretation{spine_type = excl.spine_type},
+					record = types.Record_Exclusive_Interpretation{spine_type = excl.spine_type},
 					line = token.line,
 				},
 			)
 
 		case .Tandem_Interpretation:
-			tand := token.token.(Token_Tandem_Interpretation)
+			tand := token.token.(types.Token_Tandem_Interpretation)
 			append(
 				&tree.records,
-				Record_With_Kind {
+				types.Record_With_Kind {
 					kind = .Tandem_Interpretation,
-					record = Record_Tandem_Interpretation{code = tand.code, value = tand.value},
+					record = types.Record_Tandem_Interpretation {
+						code = tand.code,
+						value = tand.value,
+					},
 					line = token.line,
 				},
 			)
 
 		case .Reference_Record:
-			ref := token.token.(Token_Reference_Record)
+			ref := token.token.(types.Token_Reference_Record)
 			append(
 				&tree.records,
-				Record_With_Kind {
+				types.Record_With_Kind {
 					kind = .Reference,
-					record = Record_Reference{code = ref.code, data = ref.data},
+					record = types.Record_Reference{code = ref.code, data = ref.data},
 					line = token.line,
 				},
 			)
 
 		case .Comment:
-			comm := token.token.(Token_Comment)
+			comm := token.token.(types.Token_Comment)
 			append(
 				&tree.records,
-				Record_With_Kind {
+				types.Record_With_Kind {
 					kind = .Comment,
-					record = Record_Comment{text = comm.text},
+					record = types.Record_Comment{text = comm.text},
 					line = token.line,
 				},
 			)
 
 		case .Bar_Line:
-			bar := token.token.(Token_Bar_Line)
+			bar := token.token.(types.Token_Bar_Line)
 			append(
 				&tree.records,
-				Record_With_Kind {
+				types.Record_With_Kind {
 					kind = .Bar_Line,
-					record = Record_Bar_Line{bar_number = bar.bar_number},
+					record = types.Record_Bar_Line{bar_number = bar.bar_number},
 					line = token.line,
 				},
 			)
@@ -77,9 +81,9 @@ parse :: proc(
 		case .Double_Bar:
 			append(
 				&tree.records,
-				Record_With_Kind {
+				types.Record_With_Kind {
 					kind = .Double_Bar,
-					record = Record_Double_Bar{},
+					record = types.Record_Double_Bar{},
 					line = token.line,
 				},
 			)
@@ -92,7 +96,7 @@ parse :: proc(
 					token.line + 1,
 					"not followed by a Note token",
 				)
-				return {}, .Invalid_Token
+				return {}, .Malformed_Note
 			}
 			next_token := &tokens[token_index + 1]
 			if next_token.kind != .Note {
@@ -102,10 +106,10 @@ parse :: proc(
 					"must be followed by a Note token, got:",
 					next_token.kind,
 				)
-				return {}, .Invalid_Token
+				return {}, .Malformed_Note
 			}
 			// Set tie_start on the next note token
-			note := &next_token.token.(Token_Note)
+			note := &next_token.token.(types.Token_Note)
 			note.tie_start = true
 		// Don't increment token_index yet - let the Note case handle it
 
@@ -113,18 +117,18 @@ parse :: proc(
 			// Tie_End must be preceded by a Note token in the same voice
 			if last_note_voice_index < 0 {
 				log.error("Tie_End token at line", token.line + 1, "not preceded by a Note token")
-				return {}, .Invalid_Token
+				return {}, .Malformed_Note
 			}
 			if len(current_line_tokens[last_note_voice_index]) == 0 {
 				log.error("Tie_End token at line", token.line + 1, "not preceded by a Note token")
-				return {}, .Invalid_Token
+				return {}, .Malformed_Note
 			}
 			// Set tie_end on the last note token added to this voice
 			last_note_index := len(current_line_tokens[last_note_voice_index]) - 1
 			current_line_tokens[last_note_voice_index][last_note_index].tie_end = true
 
 		case .Note:
-			note := token.token.(Token_Note)
+			note := token.token.(types.Token_Note)
 			if current_voice_index < 4 {
 				append(&current_line_tokens[current_voice_index], note)
 				last_note_voice_index = current_voice_index
@@ -149,14 +153,14 @@ parse :: proc(
 			if has_notes {
 				append(
 					&tree.records,
-					Record_With_Kind {
+					types.Record_With_Kind {
 						kind = .Data_Line,
-						record = Record_Data_Line{voice_tokens = current_line_tokens},
+						record = types.Record_Data_Line{voice_tokens = current_line_tokens},
 						line = token.line,
 					},
 				)
 				for i in 0 ..< 4 {
-					current_line_tokens[i] = make([dynamic]Token_Note)
+					current_line_tokens[i] = make([dynamic]types.Token_Note)
 				}
 			}
 			current_voice_index = 0
@@ -173,9 +177,9 @@ parse :: proc(
 			if has_notes {
 				append(
 					&tree.records,
-					Record_With_Kind {
+					types.Record_With_Kind {
 						kind = .Data_Line,
-						record = Record_Data_Line{voice_tokens = current_line_tokens},
+						record = types.Record_Data_Line{voice_tokens = current_line_tokens},
 						line = token.line,
 					},
 				)
@@ -191,4 +195,3 @@ parse :: proc(
 
 	return tree, nil
 }
-

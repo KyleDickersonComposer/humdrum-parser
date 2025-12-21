@@ -7,7 +7,7 @@ import "core:mem/virtual"
 import "core:os"
 import "core:unicode/utf8"
 
-import tokenize "./tokenize"
+import tokenizer "./tokenizer"
 import "build_ir"
 import "parser"
 
@@ -65,7 +65,7 @@ main :: proc() {
 	parse_data := utf8.string_to_runes(string(data))
 	defer delete(parse_data)
 
-	tokens, token_err := tokenize.tokenize(&parse_data)
+	tokens, token_err := tokenizer.tokenize(&parse_data)
 	if token_err != nil {
 		log.error("Tokenization failed:", token_err)
 		os.exit(1)

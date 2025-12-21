@@ -1,7 +1,7 @@
 package tests
 
 import "../parser"
-import "../tokenize"
+import "../tokenizer"
 import "core:mem/virtual"
 import "core:testing"
 import "core:unicode/utf8"
@@ -58,8 +58,7 @@ test_ast_parsing_integration :: proc(t: ^testing.T) {
 	}
 	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
 
-	tokens, token_err := tokenize.tokenize(&parse_data)
-	defer tokenize.cleanup_tokens(&tokens)
+	tokens, token_err := tokenizer.tokenize(&parse_data)
 	testing.expect_value(t, token_err, nil)
 
 	// Step 2: Parse AST (this is what we're testing)

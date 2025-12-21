@@ -1,14 +1,14 @@
-package tokenize
+package tokenizer
 
-import "../parser"
+import "../parsing"
+import "../types"
 import "core:fmt"
 import "core:log"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
-
-debug_print_tokens :: proc(tokens: []parser.Token_With_Kind) {
+debug_print_tokens :: proc(tokens: []types.Token_With_Kind) {
 	// Print all tokens
 	fmt.printf("=== TOKENIZER OUTPUT ===\n")
 	fmt.printf("Total tokens: %d\n\n", len(tokens))
@@ -17,7 +17,7 @@ debug_print_tokens :: proc(tokens: []parser.Token_With_Kind) {
 		fmt.printf("[%d] Line %d: ", i, token.line + 1)
 		switch token.kind {
 		case .Note:
-			note := token.token.(parser.Token_Note)
+			note := token.token.(types.Token_Note)
 			fmt.printf(
 				"Note - name:'%s' duration:%d accidental:'%s' dots:%d\n",
 				note.note_name,
@@ -30,21 +30,21 @@ debug_print_tokens :: proc(tokens: []parser.Token_With_Kind) {
 		case .Line_Break:
 			fmt.printf("Line_Break\n")
 		case .Bar_Line:
-			bar := token.token.(parser.Token_Bar_Line)
+			bar := token.token.(types.Token_Bar_Line)
 			fmt.printf("Bar_Line - bar_number:%d\n", bar.bar_number)
 		case .Double_Bar:
 			fmt.printf("Double_Bar\n")
 		case .Exclusive_Interpretation:
-			excl := token.token.(parser.Token_Exclusive_Interpretation)
+			excl := token.token.(types.Token_Exclusive_Interpretation)
 			fmt.printf("Exclusive_Interpretation - spine_type:'%s'\n", excl.spine_type)
 		case .Tandem_Interpretation:
-			tand := token.token.(parser.Token_Tandem_Interpretation)
+			tand := token.token.(types.Token_Tandem_Interpretation)
 			fmt.printf("Tandem_Interpretation - code:'%s' value:'%s'\n", tand.code, tand.value)
 		case .Reference_Record:
-			ref := token.token.(parser.Token_Reference_Record)
+			ref := token.token.(types.Token_Reference_Record)
 			fmt.printf("Reference_Record - code:'%s' data:'%s'\n", ref.code, ref.data)
 		case .Comment:
-			comm := token.token.(parser.Token_Comment)
+			comm := token.token.(types.Token_Comment)
 			fmt.printf("Comment - text:'%s'\n", comm.text)
 		case .Rest:
 			fmt.printf("Rest\n")
@@ -61,7 +61,7 @@ debug_print_tokens :: proc(tokens: []parser.Token_With_Kind) {
 }
 
 is_accidental_rune :: proc(the_accidental: rune) -> bool {
-	for check_match in parser.ACCIDENTAL_RUNE {
+	for check_match in parsing.ACCIDENTAL_RUNE {
 		if the_accidental == check_match {
 			return true
 		}
@@ -69,15 +69,139 @@ is_accidental_rune :: proc(the_accidental: rune) -> bool {
 	return false
 }
 
+// Tokenizer-specific helper functions that return types.Tokenizer_Error
+
+eat_until :: proc(p: ^types.Parser, rune_buffer: ^[dynamic]rune, needle: rune) -> types.Tokenizer_Error {
+	for {
+		if p.index >= len(p.data) {
+			return nil
+		}
+
+		if p.data[p.index] == '\n' {
+			return nil
+		}
+
+		if p.current == needle {
+			return nil
+		} else {
+			append(rune_buffer, p.current)
+			parsing.eat(p)
+		}
+	}
+
+	return nil
+}
+
+peek :: proc(p: ^types.Parser, offset: int = 1) -> (rune, types.Tokenizer_Error) {
+	pos := p.index + offset
+	if pos < 0 {
+		return '0', .Invalid_Token
+	}
+	if pos >= len(p.data) {
+		return utf8.RUNE_EOF, nil
+	}
+
+	return p.data[pos], nil
+}
+
+convert_runes_to_int :: proc(runes: []rune) -> (int, types.Tokenizer_Error) {
+	if len(runes) == 0 {
+		log.error("convert_runes_to_int: empty rune array")
+		return 0, .Failed_To_Match_Rune
+	}
+
+	to_string := utf8.runes_to_string(runes[:])
+	defer delete(to_string)
+
+	if len(to_string) == 0 {
+		log.error("convert_runes_to_int: empty string from runes")
+		return 0, .Failed_To_Match_Rune
+	}
+
+	value, ok := strconv.parse_int(to_string)
+	if !ok {
+		log.error("convert_runes_to_int: failed to parse:", to_string, "from runes:", runes)
+		return 0, .Failed_To_Match_Rune
+	}
+
+	return value, nil
+}
+
+key_table :: proc(note_name: []rune, out: ^string) -> (err: types.Tokenizer_Error) {
+	if len(note_name) == 0 {
+		log.error("key_table: empty note_name")
+		return .Failed_To_Match_Rune
+	}
+
+	if !parsing.is_note_name_rune(note_name[0]) {
+		log.error("expected first rune of :", note_name, "to be a valid note_name")
+		return .Invalid_Token
+	}
+
+	rest := note_name[1:]
+	to_string := utf8.runes_to_string(rest)
+	defer delete(to_string)
+
+	if len(rest) > 0 {
+		// Check if it's a valid accidental
+		found := false
+		for acc in parsing.ACCIDENTAL {
+			if acc == to_string {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return .Failed_To_Match_Accidental
+		}
+	}
+
+	// Normalize to uppercase
+	note_char := note_name[0]
+	if note_char >= 'a' && note_char <= 'g' {
+		note_char = rune(int(note_char) - 32) // Convert to uppercase
+	}
+
+	// Build the key name
+	if len(rest) > 0 {
+		out^ = fmt.aprintf("%c%v", note_char, to_string)
+	} else {
+		out^ = fmt.aprintf("%c", note_char)
+	}
+
+	return nil
+}
+
+create_valid_tandem_interpretation_code_map :: proc(
+	the_map: ^map[types.Valid_Tandem_Interpretation_Code]string,
+) {
+	the_map[.Meter] = "M"
+	the_map[.Key_Signature] = "k"
+	the_map[.IC_Vox] = "ICvox"
+	the_map[.I_Bass] = "Ibass"
+	the_map[.I_Tenor] = "Itenor"
+	the_map[.I_Alto] = "Ialto"
+	the_map[.I_Soprn] = "Isoprn"
+	the_map[.Clef_F4] = "clefF4"
+	the_map[.Clef_G2] = "clefG2"
+	the_map[.Clef_Gv2] = "clefGv2"
+}
+
+create_valid_record_code_map :: proc(the_map: ^map[types.Valid_Record_Code]string) {
+	the_map[.Composer] = "COM"
+	the_map[.Scholarly_Catalog_Number] = "SCT"
+	the_map[.Publisher_Catalog_Number] = "PC#"
+}
+
 parse_accidental :: proc(
-	p: ^parser.Parser,
+	p: ^types.Parser,
 	out_runes: ^[dynamic]rune,
 ) -> (
 	length: int,
-	err: parser.Parse_Error,
+	err: types.Tokenizer_Error,
 ) {
 	append(out_runes, p.current)
-	parser.eat(p)
+	parsing.eat(p)
 
 	count := 1
 
@@ -96,23 +220,23 @@ parse_accidental :: proc(
 	defer delete(to_string)
 
 	log.error("expected valid accidental, got:", out_runes)
-	return 0, parser.Syntax_Error.Malformed_Accidental
+	return 0, .Failed_To_Match_Accidental
 }
 
-parse_int_runes :: proc(p: ^parser.Parser) -> (value: int, err: parser.Parse_Error) {
+parse_int_runes :: proc(p: ^types.Parser) -> (value: int, err: types.Tokenizer_Error) {
 	if p.current < '0' || p.current > '9' {
 		log.error("parse_int_runes: current character is not a digit:", p.current)
-		return 0, parser.Conversion_Error.Failed_To_Convert_To_Integer
+		return 0, .Failed_To_Match_Rune
 	}
 
 	integer_runes: [3]rune
 	integer_runes[0] = p.current
-	parser.eat(p)
+	parsing.eat(p)
 	count := 1
 	for i in 1 ..< 3 {
 		if p.current >= '0' && p.current <= '9' {
 			integer_runes[i] = p.current
-			parser.eat(p)
+			parsing.eat(p)
 			count += 1
 		} else {
 			break
@@ -129,7 +253,7 @@ parse_int_runes :: proc(p: ^parser.Parser) -> (value: int, err: parser.Parse_Err
 			"at line:",
 			p.line_count,
 		)
-		return 0, parser.Conversion_Error.Failed_To_Convert_To_Integer
+		return 0, .Failed_To_Match_Rune
 	}
 
 	to_int, ok := strconv.parse_int(to_string)
@@ -140,21 +264,21 @@ parse_int_runes :: proc(p: ^parser.Parser) -> (value: int, err: parser.Parse_Err
 			"at line:",
 			p.line_count,
 		)
-		return 0, parser.Conversion_Error.Failed_To_Convert_To_Integer
+		return 0, .Failed_To_Match_Rune
 	}
 
 	return to_int, nil
 }
 
 parse_repeating_rune :: proc(
-	p: ^parser.Parser,
+	p: ^types.Parser,
 ) -> (
 	repeated_rune: rune,
 	repeat_count: int,
-	err: parser.Parse_Error,
+	err: types.Tokenizer_Error,
 ) {
 	rune_to_match := p.current
-	parser.eat(p)
+	parsing.eat(p)
 	count := 0
 
 	if p.current != rune_to_match {
@@ -165,19 +289,19 @@ parse_repeating_rune :: proc(
 		if p.current != rune_to_match {
 			return rune_to_match, count, nil
 		}
-		parser.eat(p)
+		parsing.eat(p)
 		count += 1
 	}
 
 	log.error("ate more than 7 repeating runes")
-	return '0', 0, parser.Tokenizer_Error.Failed_To_Parse_Repeating_Rune
+	return '0', 0, .Failed_To_Parse_Repeating_Rune
 }
 
 convert_humdrum_accidentals_to_normal_accidentals :: proc(
 	accid: string,
 ) -> (
 	string,
-	parser.Parse_Error,
+	types.Tokenizer_Error,
 ) {
 	switch accid {
 	case "n":
@@ -192,36 +316,19 @@ convert_humdrum_accidentals_to_normal_accidentals :: proc(
 		return "bb", nil
 	case:
 		log.error("expected valid humdrum accidental, got:", accid)
-		return "", parser.Tokenizer_Error.Failed_To_Match_Accidental
+		return "", .Failed_To_Match_Accidental
 	}
 
-	return "", parser.Tokenizer_Error.Failed_To_Match_Accidental
+	return "", .Failed_To_Match_Accidental
 }
 
-Exclamation_Line_Kind :: enum {
-	Comment,
-	Reference_Record,
-}
-
-Asterisk_Line_Kind :: enum {
-	Null_Interpretation,
-	Exclusive_Interpretation,
-	Tandem_Interpretation,
-}
-
-Tandem_Interpretation_Type :: enum {
-	Valid_Code,
-	Key,
-	Meter,
-	Unknown,
-}
 
 // Classify what kind of exclamation mark line this is (doesn't eat anything)
 classify_exclamation_line :: proc(
-	p: ^parser.Parser,
+	p: ^types.Parser,
 ) -> (
-	kind: Exclamation_Line_Kind,
-	err: parser.Parse_Error,
+	kind: types.Exclamation_Line_Kind,
+	err: types.Tokenizer_Error,
 ) {
 	saved_index := p.index
 	saved_current := p.current
@@ -246,10 +353,10 @@ classify_exclamation_line :: proc(
 
 // Classify what kind of asterisk line this is (doesn't eat anything)
 classify_asterisk_line :: proc(
-	p: ^parser.Parser,
+	p: ^types.Parser,
 ) -> (
-	kind: Asterisk_Line_Kind,
-	err: parser.Parse_Error,
+	kind: types.Asterisk_Line_Kind,
+	err: types.Tokenizer_Error,
 ) {
 	saved_index := p.index
 	saved_current := p.current
@@ -273,10 +380,10 @@ classify_asterisk_line :: proc(
 
 // Classify what type of tandem interpretation this is (doesn't eat anything)
 classify_tandem_interpretation :: proc(
-	p: ^parser.Parser,
+	p: ^types.Parser,
 ) -> (
-	ti_type: Tandem_Interpretation_Type,
-	err: parser.Parse_Error,
+	ti_type: types.Tandem_Interpretation_Type,
+	err: types.Tokenizer_Error,
 ) {
 	saved_index := p.index
 	saved_current := p.current
@@ -291,7 +398,7 @@ classify_tandem_interpretation :: proc(
 	// Peek at the code until tab
 	ti_code := make([dynamic]rune)
 	defer delete(ti_code)
-	parser.eat_until(p, &ti_code, '\t') or_return
+	eat_until(p, &ti_code, '\t') or_return
 
 	if len(ti_code) == 0 {
 		return .Unknown, nil
@@ -301,7 +408,7 @@ classify_tandem_interpretation :: proc(
 
 	// Check if it's a key (starts with note name, length 2-3) FIRST
 	// This must come before valid code check
-	if (len(ti_code) == 2 || len(ti_code) == 3) && parser.is_note_name_rune(ti_code[0]) {
+	if (len(ti_code) == 2 || len(ti_code) == 3) && parsing.is_note_name_rune(ti_code[0]) {
 		return .Key, nil
 	}
 
@@ -312,9 +419,9 @@ classify_tandem_interpretation :: proc(
 	}
 
 	// Check if it's a valid code
-	vtic_map := make(map[parser.Valid_Tandem_Interpretation_Code]string)
+	vtic_map := make(map[types.Valid_Tandem_Interpretation_Code]string)
 	defer delete(vtic_map)
-	parser.create_valid_tandem_interpretation_code_map(&vtic_map)
+	create_valid_tandem_interpretation_code_map(&vtic_map)
 
 	for _, v in vtic_map {
 		// Exact match OR code starts with this valid code (e.g., "k" matches "k[]")
@@ -337,14 +444,14 @@ classify_tandem_interpretation :: proc(
 
 // Parse a valid tandem interpretation code (one spine)
 parse_valid_tandem_code :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Match against valid codes (create map once)
-	vtic_map := make(map[parser.Valid_Tandem_Interpretation_Code]string)
+	vtic_map := make(map[types.Valid_Tandem_Interpretation_Code]string)
 	defer delete(vtic_map)
-	parser.create_valid_tandem_interpretation_code_map(&vtic_map)
+	create_valid_tandem_interpretation_code_map(&vtic_map)
 
 	// Eat the asterisk
 	_, _ = parse_repeating_rune(p) or_return
@@ -354,7 +461,7 @@ parse_valid_tandem_code :: proc(
 	defer delete(ti_code)
 	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
 		append(&ti_code, p.current)
-		parser.eat(p)
+		parsing.eat(p)
 	}
 	ti_code_string := utf8.runes_to_string(ti_code[:])
 
@@ -374,9 +481,9 @@ parse_valid_tandem_code :: proc(
 				}
 				append(
 					tokens,
-					parser.Token_With_Kind {
+					types.Token_With_Kind {
 						kind = .Tandem_Interpretation,
-						token = parser.Token_Tandem_Interpretation {
+						token = types.Token_Tandem_Interpretation {
 							code = "key",
 							value = key_value,
 							line = p.line_count,
@@ -388,9 +495,9 @@ parse_valid_tandem_code :: proc(
 				// Regular valid code
 				append(
 					tokens,
-					parser.Token_With_Kind {
+					types.Token_With_Kind {
 						kind = .Tandem_Interpretation,
-						token = parser.Token_Tandem_Interpretation {
+						token = types.Token_Tandem_Interpretation {
 							code = v,
 							value = ti_code_string,
 							line = p.line_count,
@@ -414,10 +521,10 @@ parse_valid_tandem_code :: proc(
 
 // Parse a key tandem interpretation (one spine)
 parse_key_tandem :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Eat the asterisk
 	_, _ = parse_repeating_rune(p) or_return
 
@@ -426,7 +533,7 @@ parse_key_tandem :: proc(
 	defer delete(ti_code)
 	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
 		append(&ti_code, p.current)
-		parser.eat(p)
+		parsing.eat(p)
 	}
 
 	// Extract key - handle *a: format (note name keys)
@@ -443,13 +550,13 @@ parse_key_tandem :: proc(
 		for r in ti_code[:end_idx] {
 			append(&key_code, r)
 		}
-		parser.key_table(key_code[:], &out_buffer) or_return
+		key_table(key_code[:], &out_buffer) or_return
 
 		append(
 			tokens,
-			parser.Token_With_Kind {
+			types.Token_With_Kind {
 				kind = .Tandem_Interpretation,
-				token = parser.Token_Tandem_Interpretation {
+				token = types.Token_Tandem_Interpretation {
 					code = "key",
 					value = out_buffer,
 					line = p.line_count,
@@ -464,10 +571,10 @@ parse_key_tandem :: proc(
 
 // Parse a meter tandem interpretation (one spine)
 parse_meter_tandem :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Eat the asterisk
 	_, _ = parse_repeating_rune(p) or_return
 
@@ -476,7 +583,7 @@ parse_meter_tandem :: proc(
 	defer delete(ti_code)
 	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
 		append(&ti_code, p.current)
-		parser.eat(p)
+		parsing.eat(p)
 	}
 
 	// Parse meter value (e.g., M4/4 -> "4/4")
@@ -496,18 +603,18 @@ parse_meter_tandem :: proc(
 		if slash_index > 0 {
 			// Extract numerator and denominator
 			numerator_runes := without_m[:slash_index]
-			numerator := parser.convert_runes_to_int(numerator_runes) or_return
+			numerator := convert_runes_to_int(numerator_runes) or_return
 
 			denominator_runes := without_m[slash_index + 1:]
 			if len(denominator_runes) > 0 {
-				denominator := parser.convert_runes_to_int(denominator_runes) or_return
+				denominator := convert_runes_to_int(denominator_runes) or_return
 				meter_value := fmt.aprintf("%v/%v", numerator, denominator)
 
 				append(
 					tokens,
-					parser.Token_With_Kind {
+					types.Token_With_Kind {
 						kind = .Tandem_Interpretation,
-						token = parser.Token_Tandem_Interpretation {
+						token = types.Token_Tandem_Interpretation {
 							code = "Meter",
 							value = meter_value,
 							line = p.line_count,
@@ -524,41 +631,41 @@ parse_meter_tandem :: proc(
 
 // Parse an unknown/unsupported tandem interpretation (one spine)
 parse_unknown_tandem :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
-		// Eat the asterisk
-		_, _ = parse_repeating_rune(p) or_return
+) -> types.Tokenizer_Error {
+	// Eat the asterisk
+	_, _ = parse_repeating_rune(p) or_return
 
-		// Get the code for logging
-		ti_code := make([dynamic]rune)
-		defer delete(ti_code)
-		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
-			append(&ti_code, p.current)
-			parser.eat(p)
-		}
-		ti_code_string := utf8.runes_to_string(ti_code[:])
+	// Get the code for logging
+	ti_code := make([dynamic]rune)
+	defer delete(ti_code)
+	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+		append(&ti_code, p.current)
+		parsing.eat(p)
+	}
+	ti_code_string := utf8.runes_to_string(ti_code[:])
 
-		if len(ti_code_string) > 0 {
-			log.warn(
-				"Unsupported tandem interpretation code:",
-				ti_code_string,
-				"at line:",
-				p.line_count + 1,
-				"- ignoring (not in valid codes map)",
-			)
-		}
+	if len(ti_code_string) > 0 {
+		log.warn(
+			"Unsupported tandem interpretation code:",
+			ti_code_string,
+			"at line:",
+			p.line_count + 1,
+			"- ignoring (not in valid codes map)",
+		)
+	}
 
 	return nil
 }
 
 // Parse exclamation line - shows consumption flow
 parse_exclamation_line :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	line_kind := classify_exclamation_line(p) or_return
 
 	switch line_kind {
@@ -569,7 +676,7 @@ parse_exclamation_line :: proc(
 		_, _ = parse_repeating_rune(p) or_return
 		// Eat rest of comment line (no token created)
 		clear(eated)
-		parser.eat_until(p, eated, '\n')
+		eat_until(p, eated, '\n')
 		return nil
 
 	case .Reference_Record:
@@ -579,33 +686,33 @@ parse_exclamation_line :: proc(
 		// Eat code until ':'
 		record_code := make([dynamic]rune)
 		defer delete(record_code)
-		parser.eat_until(p, &record_code, ':')
+		eat_until(p, &record_code, ':')
 		code_string := utf8.runes_to_string(record_code[:])
 
 		// Eat until next ':'
-		parser.eat_until(p, eated, ':')
+		eat_until(p, eated, ':')
 
 		// Match against valid codes (matching logic hidden)
-		vrc_map := make(map[parser.Valid_Record_Code]string)
+		vrc_map := make(map[types.Valid_Record_Code]string)
 		defer delete(vrc_map)
-		parser.create_valid_record_code_map(&vrc_map)
+		create_valid_record_code_map(&vrc_map)
 
 		match_found := false
 		for k, v in vrc_map {
 			if code_string == v {
 				// Eat the ':' chars
-				parser.eat(p)
-				parser.eat(p)
+				parsing.eat(p)
+				parsing.eat(p)
 				// Eat data until newline
 				clear(eated)
-				parser.eat_until(p, eated, '\n')
+				eat_until(p, eated, '\n')
 				data_string := utf8.runes_to_string(eated[:])
 				match_found = true
 				append(
 					tokens,
-					parser.Token_With_Kind {
+					types.Token_With_Kind {
 						kind = .Reference_Record,
-						token = parser.Token_Reference_Record {
+						token = types.Token_Reference_Record {
 							code = k,
 							data = data_string,
 							line = p.line_count,
@@ -629,7 +736,7 @@ parse_exclamation_line :: proc(
 			)
 			// Eat rest of line (no token created)
 			clear(eated)
-			parser.eat_until(p, eated, '\n')
+			eat_until(p, eated, '\n')
 			return nil
 		}
 		return nil
@@ -640,10 +747,10 @@ parse_exclamation_line :: proc(
 
 // Parse asterisk line - shows consumption flow
 parse_asterisk_line :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	line_kind := classify_asterisk_line(p) or_return
 
 	switch line_kind {
@@ -684,7 +791,7 @@ parse_asterisk_line :: proc(
 
 			// If we hit a tab, continue to next spine; if newline, we're done
 			if p.current == '\t' {
-				parser.eat(p) // Eat the tab
+				parsing.eat(p) // Eat the tab
 				continue
 			} else {
 				// Newline or EOF - done with this line
@@ -699,25 +806,25 @@ parse_asterisk_line :: proc(
 
 // Parse null interpretation (*-...)
 parse_null_interpretation :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Eat the asterisks
 	_, _ = parse_repeating_rune(p) or_return
 	// Eat the '-'
-	parser.eat(p)
+	parsing.eat(p)
 	// Eat rest of line
-	parser.eat_until(p, eated, '\n')
+	eat_until(p, eated, '\n')
 	return nil
 }
 
 // Parse exclusive interpretation (**kern)
 parse_exclusive_interpretation :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Parse each spine on the line (tab-separated)
 	for {
 		// Eat both asterisks (**)
@@ -726,21 +833,21 @@ parse_exclusive_interpretation :: proc(
 		clear(eated)
 		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
 			append(eated, p.current)
-			parser.eat(p)
+			parsing.eat(p)
 		}
 		spine_type := utf8.runes_to_string(eated[:])
 
 		// Validate (matching logic)
 		if spine_type != "kern" {
 			log.error("expected: kern", "got:", spine_type, "on line:", p.line_count + 1)
-			return parser.Tokenizer_Error.Unsupported_Exclusive_Interpretation_Code
+			return .Unsupported_Exclusive_Interpretation_Code
 		}
 
 		append(
 			tokens,
-			parser.Token_With_Kind {
+			types.Token_With_Kind {
 				kind = .Exclusive_Interpretation,
-				token = parser.Token_Exclusive_Interpretation {
+				token = types.Token_Exclusive_Interpretation {
 					spine_type = spine_type,
 					line = p.line_count,
 				},
@@ -750,7 +857,7 @@ parse_exclusive_interpretation :: proc(
 
 		// If we hit a tab, continue to next spine; if newline, we're done
 		if p.current == '\t' {
-			parser.eat(p) // Eat the tab
+			parsing.eat(p) // Eat the tab
 			continue
 		} else {
 			// Newline or EOF - done with this line
@@ -762,25 +869,26 @@ parse_exclusive_interpretation :: proc(
 
 // Parse equals line - shows consumption flow
 parse_equals_line :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Peek for double bar
-	if (parser.peek(p) or_return) == '=' {
+	peeked := peek(p) or_return
+	if peeked == '=' {
 		// Double bar - eat both '=' chars
-		parser.eat(p)
-		parser.eat(p)
+		parsing.eat(p)
+		parsing.eat(p)
 		append(
 			tokens,
-			parser.Token_With_Kind {
+			types.Token_With_Kind {
 				kind = .Double_Bar,
-				token = parser.Token_Double_Bar{line = p.line_count},
+				token = types.Token_Double_Bar{line = p.line_count},
 				line = p.line_count,
 			},
 		)
 		// Eat rest of line
-		parser.eat_until(p, eated, '\n') or_return
+		eat_until(p, eated, '\n') or_return
 		return nil
 	}
 
@@ -790,49 +898,49 @@ parse_equals_line :: proc(
 
 // Parse bar line (=<number>)
 parse_bar_line :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Eat the '='
-	parser.eat(p)
-	
+	parsing.eat(p)
+
 	// Check for double barline (==)
 	if p.current == '=' {
-		parser.eat(p)
+		parsing.eat(p)
 		// Double barline - use previous bar number or 0
 		bar_number := 0
 		if len(tokens) > 0 {
 			// Try to get last bar number
 			for i := len(tokens) - 1; i >= 0; i -= 1 {
 				if tokens[i].kind == .Bar_Line {
-					bar_line := tokens[i].token.(parser.Token_Bar_Line)
+					bar_line := tokens[i].token.(types.Token_Bar_Line)
 					bar_number = bar_line.bar_number
 					break
 				}
 			}
 		}
-		
+
 		append(
 			tokens,
-			parser.Token_With_Kind {
+			types.Token_With_Kind {
 				kind = .Bar_Line,
-				token = parser.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
+				token = types.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
 				line = p.line_count,
 			},
 		)
-		
+
 		// Eat rest of line
 		clear(eated)
-		parser.eat_until(p, eated, '\n') or_return
+		eat_until(p, eated, '\n')
 		return nil
 	}
-	
+
 	// Parse bar number - only digits, stop at first non-digit
 	clear(eated)
 	for p.current >= '0' && p.current <= '9' {
 		append(eated, p.current)
-		parser.eat(p)
+		parsing.eat(p)
 	}
 
 	if len(eated) == 0 {
@@ -843,51 +951,51 @@ parse_bar_line :: proc(
 			// Try to get last bar number
 			for i := len(tokens) - 1; i >= 0; i -= 1 {
 				if tokens[i].kind == .Bar_Line {
-					bar_line := tokens[i].token.(parser.Token_Bar_Line)
+					bar_line := tokens[i].token.(types.Token_Bar_Line)
 					bar_number = bar_line.bar_number + 1
 					break
 				}
 			}
 		}
-		
+
 		append(
 			tokens,
-			parser.Token_With_Kind {
+			types.Token_With_Kind {
 				kind = .Bar_Line,
-				token = parser.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
+				token = types.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
 				line = p.line_count,
 			},
 		)
-		
+
 		// Eat rest of line (including special characters like :|!)
-		parser.eat_until(p, eated, '\n') or_return
+		eat_until(p, eated, '\n')
 		return nil
 	}
 
-	bar_number := parser.convert_runes_to_int(eated[:]) or_return
+	bar_number := convert_runes_to_int(eated[:]) or_return
 
 	append(
 		tokens,
-		parser.Token_With_Kind {
+		types.Token_With_Kind {
 			kind = .Bar_Line,
-			token = parser.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
+			token = types.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
 			line = p.line_count,
 		},
 	)
 
 	// Eat rest of line (including any special characters after the number)
 	clear(eated)
-	parser.eat_until(p, eated, '\n') or_return
+	eat_until(p, eated, '\n')
 	return nil
 }
 
 // Parse note - shows consumption flow
 parse_note :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
-	note_token := parser.Token_Note{}
+) -> types.Tokenizer_Error {
+	note_token := types.Token_Note{}
 
 	// Initialize note token
 	note_token.tie_start = false
@@ -897,7 +1005,7 @@ parse_note :: proc(
 
 	// Eat duration
 	if p.current < '0' || p.current > '9' {
-		return parser.Syntax_Error.Malformed_Note
+		return .Invalid_Token
 	}
 	note_token.duration = parse_int_runes(p) or_return
 
@@ -916,11 +1024,11 @@ parse_note :: proc(
 			"' after duration. Accidentals must appear after a note name (e.g., '4G#', not '4#'). Line:",
 			p.line_count + 1,
 		)
-		return parser.Syntax_Error.Malformed_Note
+		return .Invalid_Token
 	}
 
 	// Eat note name
-	if !parser.is_note_name_rune(p.current) {
+	if !parsing.is_note_name_rune(p.current) {
 		log.error(
 			"malformed note_name: character '",
 			p.current,
@@ -929,7 +1037,7 @@ parse_note :: proc(
 			") is not a valid note name rune on line:",
 			p.line_count + 1,
 		)
-		return parser.Syntax_Error.Malformed_Note
+		return .Invalid_Token
 	}
 	note_rune, note_repeat_count := parse_repeating_rune(p) or_return
 	note_token.note_repeat_count = note_repeat_count
@@ -946,11 +1054,11 @@ parse_note :: proc(
 	// Eat courtesy accidental if present
 	if p.current == 'X' {
 		log.warn("courtesy accidentals are ignored")
-		parser.eat(p)
+		parsing.eat(p)
 	}
 
 	// Determine if lowercase (matching logic)
-	for n in parser.LOWER_CASE_NOTE_NAMES {
+	for n in parsing.LOWER_CASE_NOTE_NAMES {
 		if note_rune == n {
 			note_token.is_lower_case = true
 			break
@@ -967,7 +1075,7 @@ parse_note :: proc(
 	// Eat fermata if present
 	if p.current == ';' {
 		note_token.has_fermata = true
-		parser.eat(p)
+		parsing.eat(p)
 	}
 
 	if !note_token.is_lower_case {
@@ -985,14 +1093,14 @@ parse_note :: proc(
 	// Note: Repeated note names (CC, cc) are valid - the repeat count is in note_repeat_count
 	if len(to_string) == 0 {
 		log.error("Invalid note: empty note name at line:", p.line_count + 1)
-		return parser.Syntax_Error.Malformed_Note
+		return .Invalid_Token
 	}
 
 	// Check that the note name is a valid note letter A-G
 	note_name_runes := utf8.string_to_runes(to_string)
 	defer delete(note_name_runes)
 
-	if len(note_name_runes) != 1 || !parser.is_note_name_rune(note_name_runes[0]) {
+	if len(note_name_runes) != 1 || !parsing.is_note_name_rune(note_name_runes[0]) {
 		log.error(
 			"Invalid note name:",
 			to_string,
@@ -1001,13 +1109,13 @@ parse_note :: proc(
 			"(expected single letter A-G) at line:",
 			p.line_count + 1,
 		)
-		return parser.Syntax_Error.Malformed_Note
+		return .Invalid_Token
 	}
 
 	note_token.note_name = to_string
 	note_token.line = p.line_count
 
-	append(tokens, parser.Token_With_Kind{kind = .Note, token = note_token, line = p.line_count})
+	append(tokens, types.Token_With_Kind{kind = .Note, token = note_token, line = p.line_count})
 
 	// Eat until tab, but validate characters we encounter
 	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
@@ -1017,36 +1125,36 @@ parse_note :: proc(
 				"Invalid token: continuation token '.' found after note. Line:",
 				p.line_count + 1,
 			)
-			return parser.Syntax_Error.Malformed_Note
+			return .Invalid_Token
 		}
 		// Stop eating if we encounter beaming characters (J, L) - let tokenizer handle them
 		if p.current == 'J' || p.current == 'L' {
 			break
 		}
 		append(eated, p.current)
-		parser.eat(p)
+		parsing.eat(p)
 	}
 	return nil
 }
 
 // Parse continuation token - shows consumption flow
 parse_continuation_token :: proc(
-	p: ^parser.Parser,
-	tokens: ^[dynamic]parser.Token_With_Kind,
+	p: ^types.Parser,
+	tokens: ^[dynamic]types.Token_With_Kind,
 	eated: ^[dynamic]rune,
-) -> parser.Parse_Error {
+) -> types.Tokenizer_Error {
 	// Check if this is a continuation token (not start of note)
-	peeked := parser.peek(p) or_return
+	peeked, _ := peek(p)
 	is_digit_or_bracket := (peeked >= '0' && peeked <= '9') || peeked == '['
 	if !is_digit_or_bracket {
 		// This is a continuation token
 		// Eat the '.'
-		parser.eat(p)
+		parsing.eat(p)
 		// Eat until tab
-		parser.eat_until(p, eated, '\t')
+		eat_until(p, eated, '\t')
 		return nil
 	}
 	// Otherwise, skip the '.' and let next char trigger note parsing
-	parser.eat(p)
+	parsing.eat(p)
 	return nil
 }
