@@ -3,6 +3,7 @@ package parser
 import "core:fmt"
 import "core:log"
 import "core:strconv"
+import "core:strings"
 import "core:unicode/utf8"
 
 eat :: proc(p: ^Parser) {
@@ -143,6 +144,11 @@ convert_runes_to_int :: proc(runes: []rune) -> (int, Conversion_Error) {
 }
 
 key_table :: proc(note_name: []rune, out: ^string) -> (err: Parse_Error) {
+	if len(note_name) == 0 {
+		log.error("key_table: empty note_name")
+		return .Key_Lookup_Failed
+	}
+
 	if !is_note_name_rune(note_name[0]) {
 		log.error("expected first rune of :", note_name, "to be a valid note_name")
 		return .Malformed_Note
@@ -156,23 +162,20 @@ key_table :: proc(note_name: []rune, out: ^string) -> (err: Parse_Error) {
 		match_accidental(to_string) or_return
 	}
 
-	switch note_name[0] {
-	case 'a', 'C':
-		if len(rest) > 0 {
-			out^ = fmt.aprintf("%v%v", 'C', rest)
-			return nil
-		}
-
-		out^ = "C"
-		return nil
-
-	case:
-		catted := fmt.aprintf("%v%v", note_name[0], rest)
-		log.error("unsupported key:", catted)
-		return .Key_Lookup_Failed
+	// Normalize to uppercase
+	note_char := note_name[0]
+	if note_char >= 'a' && note_char <= 'g' {
+		note_char = rune(int(note_char) - 32) // Convert to uppercase
 	}
 
-	return .Key_Lookup_Failed
+	// Build the key name
+	if len(rest) > 0 {
+		out^ = fmt.aprintf("%c%v", note_char, to_string)
+	} else {
+		out^ = fmt.aprintf("%c", note_char)
+	}
+
+	return nil
 }
 
 match_accidental :: proc(possible_accidental: string) -> (string, Parse_Error) {
@@ -184,6 +187,68 @@ match_accidental :: proc(possible_accidental: string) -> (string, Parse_Error) {
 
 	log.error("expected accidental to match a valid accidental, got:", possible_accidental)
 	return "", .Failed_To_Match_Accidental
+}
+
+// Convert key signature notation (e.g., "[f#]", "[b-]", "[]") to key name (e.g., "G", "F", "C")
+// Key signatures in Humdrum: [] = C, [f#] = G, [f#c#] = D, [f#c#g#] = A, [f#c#g#d#] = E, [f#c#g#d#a#] = B, [f#c#g#d#a#e#] = F#
+// Flats: [b-] = F, [b-e-] = Bb, [b-e-a-] = Eb, [b-e-a-d-] = Ab, [b-e-a-d-g-] = Db, [b-e-a-d-g-c-] = Gb
+convert_key_signature_to_key_name :: proc(key_sig: string) -> (string, Parse_Error) {
+	// Remove brackets if present
+	cleaned := key_sig
+	if strings.has_prefix(cleaned, "[") && strings.has_suffix(cleaned, "]") {
+		cleaned = cleaned[1:len(cleaned)-1]
+	}
+
+	// Empty means C major
+	if len(cleaned) == 0 {
+		return "C", nil
+	}
+
+	// Count sharps and flats
+	sharps := 0
+	flats := 0
+	
+	runes := utf8.string_to_runes(cleaned)
+	defer delete(runes)
+	
+	i := 0
+	for i < len(runes) {
+		if i + 1 < len(runes) && runes[i+1] == '#' {
+			sharps += 1
+			i += 2 // Skip note and #
+		} else if i + 1 < len(runes) && runes[i+1] == '-' {
+			flats += 1
+			i += 2 // Skip note and -
+		} else {
+			i += 1
+		}
+	}
+
+	// Convert to key name based on number of sharps/flats
+	if sharps > 0 && flats == 0 {
+		switch sharps {
+		case 1: return "G", nil
+		case 2: return "D", nil
+		case 3: return "A", nil
+		case 4: return "E", nil
+		case 5: return "B", nil
+		case 6: return "F#", nil
+		case 7: return "C#", nil
+		}
+	} else if flats > 0 && sharps == 0 {
+		switch flats {
+		case 1: return "F", nil
+		case 2: return "Bb", nil
+		case 3: return "Eb", nil
+		case 4: return "Ab", nil
+		case 5: return "Db", nil
+		case 6: return "Gb", nil
+		case 7: return "Cb", nil
+		}
+	}
+
+	log.error("unsupported key signature:", key_sig, "sharps:", sharps, "flats:", flats)
+	return "C", .Key_Lookup_Failed
 }
 
 is_note_name_rune :: proc(note_name: rune) -> bool {

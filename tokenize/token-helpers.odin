@@ -925,17 +925,73 @@ parse_bar_line :: proc(
 ) -> parser.Parse_Error {
 	// Eat the '='
 	parser.eat(p)
-	// Eat bar number until tab
+	
+	// Check for double barline (==)
+	if p.current == '=' {
+		parser.eat(p)
+		// Double barline - use previous bar number or 0
+		bar_number := 0
+		if len(tokens) > 0 {
+			// Try to get last bar number
+			for i := len(tokens) - 1; i >= 0; i -= 1 {
+				if tokens[i].kind == .Bar_Line {
+					bar_line := tokens[i].token.(Token_Bar_Line)
+					bar_number = bar_line.bar_number
+					break
+				}
+			}
+		}
+		
+		append(
+			tokens,
+			Token_With_Kind {
+				kind = .Bar_Line,
+				token = Token_Bar_Line{bar_number = bar_number, line = p.line_count},
+				line = p.line_count,
+			},
+		)
+		
+		// Eat rest of line
+		clear(eated)
+		parser.eat_until(p, eated, '\n') or_return
+		return nil
+	}
+	
+	// Parse bar number - only digits, stop at first non-digit
 	clear(eated)
-	parser.eat_until(p, eated, '\t') or_return
-
-	if len(eated) == 0 {
-		log.error("couldn't parse bar_number: empty at line:", p.line_count)
-		return parser.Syntax_Error.Malformed_Bar_Number
+	for p.current >= '0' && p.current <= '9' {
+		append(eated, p.current)
+		parser.eat(p)
 	}
 
-	bar_str := utf8.runes_to_string(eated[:])
-	defer delete(bar_str)
+	if len(eated) == 0 {
+		// No number found - might be special barline like =:|! or just =
+		// Use 0 as default or try to get previous bar number
+		bar_number := 0
+		if len(tokens) > 0 {
+			// Try to get last bar number
+			for i := len(tokens) - 1; i >= 0; i -= 1 {
+				if tokens[i].kind == .Bar_Line {
+					bar_line := tokens[i].token.(Token_Bar_Line)
+					bar_number = bar_line.bar_number + 1
+					break
+				}
+			}
+		}
+		
+		append(
+			tokens,
+			Token_With_Kind {
+				kind = .Bar_Line,
+				token = Token_Bar_Line{bar_number = bar_number, line = p.line_count},
+				line = p.line_count,
+			},
+		)
+		
+		// Eat rest of line (including special characters like :|!)
+		parser.eat_until(p, eated, '\n') or_return
+		return nil
+	}
 
 	bar_number := parser.convert_runes_to_int(eated[:]) or_return
 
@@ -948,7 +1004,8 @@ parse_bar_line :: proc(
 		},
 	)
 
-	// Eat rest of line
+	// Eat rest of line (including any special characters after the number)
+	clear(eated)
 	parser.eat_until(p, eated, '\n') or_return
 	return nil
 }

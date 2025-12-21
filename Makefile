@@ -17,11 +17,6 @@ build-windows:
 	@echo "Note: This command must be run on Windows. Cross-compilation is not supported."
 	odin build . -target:windows_amd64 -out:bin/humdrum-parser.exe
 
-# Shared library builds (builds from lib package to export functions)
-build-dll:
-	@mkdir -p bin
-	odin build ./lib -build-mode:dll -out:bin/libhumdrum-parser
-
 build-dll-macos:
 	@mkdir -p bin
 	odin build ./lib -target:darwin_amd64 -build-mode:dll -out:bin/libhumdrum-parser.dylib

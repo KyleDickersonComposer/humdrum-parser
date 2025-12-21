@@ -132,7 +132,18 @@ build_ir :: proc(
 			tand := record.record.(parse_syntax.Record_Tandem_Interpretation)
 			if tand.code == "key" {
 				if len(tand.value) > 0 {
-					key = strings.clone(tand.value)
+					// Check if it's key signature notation (e.g., "[f#]") or key name (e.g., "G:")
+					if strings.has_prefix(tand.value, "[") {
+						// Convert key signature to key name
+						key_name, key_err := parser.convert_key_signature_to_key_name(tand.value)
+						if key_err != nil {
+							return json_struct, key_err
+						}
+						key = strings.clone(key_name)
+					} else {
+						// Already a key name, use as-is
+						key = strings.clone(tand.value)
+					}
 				}
 			} else if tand.code == "M" {
 				// Parse meter from value like "M4/4"
@@ -173,6 +184,13 @@ build_ir :: proc(
 			has_changed := false
 			if bar.bar_number == 1 && len(bar_data_tokens) == 0 {
 				has_changed = true
+			}
+
+			// Ensure meter is initialized (default to 4/4 if not set)
+			if meter.numerator == 0 {
+				meter.numerator = 4
+				meter.denominator = 4
+				meter.type = strings.clone("simple")
 			}
 
 			staff_grp_IDs := make([]string, 1, context.allocator)
