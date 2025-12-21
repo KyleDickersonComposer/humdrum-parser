@@ -145,12 +145,9 @@ build_ir :: proc(
 						key = strings.clone(tand.value)
 					}
 				}
-			} else if tand.code == "M" {
-				// Parse meter from value like "M4/4"
+			} else if tand.code == "Meter" {
+				// Parse meter from value like "4/4" (already parsed from "M4/4")
 				meter_str := tand.value
-				if strings.has_prefix(meter_str, "M") {
-					meter_str = meter_str[1:]
-				}
 				parts := strings.split(meter_str, "/", context.temp_allocator)
 				// No delete needed - scratch arena handles cleanup
 				if len(parts) == 2 {
@@ -187,10 +184,45 @@ build_ir :: proc(
 			}
 
 			// Ensure meter is initialized (default to 4/4 if not set)
+			// This meter will be used for bar 1 and should match bar 0 if it exists
 			if meter.numerator == 0 {
 				meter.numerator = 4
 				meter.denominator = 4
 				meter.type = strings.clone("simple")
+			}
+
+			// If first barline is =1 and we have bar 0 notes all at timestamp 1.0,
+			// they're not a pickup - reassign them to bar 1
+			if bar.bar_number == 1 && len(bar_data_tokens) > 0 && bar_data_tokens[0].bar_number == 0 {
+				// Check if all notes in bar 0 are at timestamp 1.0 (not a pickup)
+				all_at_timestamp_one := true
+				for &note in note_data_tokens {
+					if note.bar_number == 0 && note.timestamp != 1.0 {
+						all_at_timestamp_one = false
+						break
+					}
+				}
+				
+				// If all notes are at timestamp 1.0, remove bar 0 and reassign notes to bar 1
+				if all_at_timestamp_one {
+					// Remove bar 0 layout (remove first element from dynamic array)
+					// Create new array without first element
+					new_bar_tokens := make([dynamic]types.Layout, 0, len(bar_data_tokens) - 1, context.allocator)
+					for i in 1..<len(bar_data_tokens) {
+						append(&new_bar_tokens, bar_data_tokens[i])
+					}
+					bar_data_tokens = new_bar_tokens
+					
+					// Reassign notes from bar 0 to bar 1
+					for &note in note_data_tokens {
+						if note.bar_number == 0 {
+							note.bar_number = 1
+						}
+					}
+				} else {
+					// Real pickup - update bar 0 meter to match bar 1 (same meter for pickup and bar 1)
+					bar_data_tokens[0].meter = meter
+				}
 			}
 
 			staff_grp_IDs := make([]string, 1, context.allocator)
@@ -215,6 +247,8 @@ build_ir :: proc(
 			data_line := record.record.(parse_syntax.Record_Data_Line)
 
 			if current_bar == 0 && len(bar_data_tokens) == 0 {
+				// Meter should already be set from tandem interpretation before data lines
+				// If not set, we'll update bar 0's meter when we hit bar 1
 				staff_grp_IDs := make([]string, 1, context.allocator)
 				staff_grp_IDs[0] = staff_grps[0].ID
 				append(
@@ -223,7 +257,7 @@ build_ir :: proc(
 						bar_number = 0,
 						has_layout_changed = true,
 						key = key,
-						meter = meter,
+						meter = meter, // Same meter as bar 1 (will be updated if not set yet)
 						staff_grp_IDs = staff_grp_IDs,
 					},
 				)
