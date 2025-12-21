@@ -183,14 +183,6 @@ build_ir :: proc(
 				has_changed = true
 			}
 
-			// Ensure meter is initialized (default to 4/4 if not set)
-			// This meter will be used for bar 1 and should match bar 0 if it exists
-			if meter.numerator == 0 {
-				meter.numerator = 4
-				meter.denominator = 4
-				meter.type = strings.clone("simple")
-			}
-
 			// If first barline is =1 and we have bar 0 notes all at timestamp 1.0,
 			// they're not a pickup - reassign them to bar 1
 			if bar.bar_number == 1 && len(bar_data_tokens) > 0 && bar_data_tokens[0].bar_number == 0 {
