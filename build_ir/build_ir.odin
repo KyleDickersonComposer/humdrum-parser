@@ -186,40 +186,13 @@ build_ir :: proc(
 				has_changed = true
 			}
 
-			// If first barline is =1 and we have bar 0 notes all at timestamp 1.0,
-			// they're not a pickup - reassign them to bar 1
+			// If first barline is =1 and we have bar 0 notes, update bar 0 meter to match bar 1
+			// (Notes before the first barline are always a pickup measure in bar 0)
 			if bar.bar_number == 1 &&
 			   len(bar_data_tokens) > 0 &&
 			   bar_data_tokens[0].bar_number == 0 {
-				// Check if all notes in bar 0 are at timestamp 1.0 (not a pickup)
-				all_at_timestamp_one := true
-				for &note in note_data_tokens {
-					if note.bar_number == 0 && note.timestamp != 1.0 {
-						all_at_timestamp_one = false
-						break
-					}
-				}
-
-				// If all notes are at timestamp 1.0, remove bar 0 and reassign notes to bar 1
-				if all_at_timestamp_one {
-					// Remove bar 0 layout (remove first element from dynamic array)
-					// Create new array without first element
-					new_bar_tokens := make([dynamic]types.Layout, 0, len(bar_data_tokens) - 1)
-					for i in 1 ..< len(bar_data_tokens) {
-						append(&new_bar_tokens, bar_data_tokens[i])
-					}
-					bar_data_tokens = new_bar_tokens
-
-					// Reassign notes from bar 0 to bar 1
-					for &note in note_data_tokens {
-						if note.bar_number == 0 {
-							note.bar_number = 1
-						}
-					}
-				} else {
-					// Real pickup - update bar 0 meter to match bar 1 (same meter for pickup and bar 1)
-					bar_data_tokens[0].meter = meter
-				}
+				// Real pickup - update bar 0 meter to match bar 1 (same meter for pickup and bar 1)
+				bar_data_tokens[0].meter = meter
 			}
 
 			staff_grp_IDs := make([]string, 1)
