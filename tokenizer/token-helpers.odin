@@ -1015,6 +1015,32 @@ parse_note :: proc(
 		note_token.dots = dots_repeat_count + 1
 	}
 
+	// Check if this is a rest ('r') instead of a note
+	if p.current == 'r' {
+		// Eat the 'r'
+		parsing.eat(p)
+		
+		// If followed by 'y', silently eat it (y hides the rest)
+		if p.current == 'y' {
+			parsing.eat(p)
+		}
+		
+		// Create a rest token
+		rest_token := types.Token_Rest {
+			duration = note_token.duration,
+			dots = note_token.dots,
+			line = p.line_count,
+		}
+		append(tokens, types.Token_With_Kind{kind = .Rest, token = rest_token, line = p.line_count})
+		
+		// Eat until tab, newline, or EOF (skip any remaining characters)
+		for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
+			parsing.eat(p)
+		}
+		
+		return nil
+	}
+	
 	// HARD ERROR: # and - are accidentals and MUST appear AFTER a note name
 	// Standalone "4#" or "4-" should never exist - these must error
 	if p.current == '#' || p.current == '-' {
