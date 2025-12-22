@@ -583,7 +583,19 @@ parse_key_tandem :: proc(
 		for r in ti_code[:end_idx] {
 			append(&key_code, r)
 		}
+		
+		// Check if first character is lowercase (indicates minor key in Humdrum)
+		is_minor := false
+		if len(key_code) > 0 && key_code[0] >= 'a' && key_code[0] <= 'g' {
+			is_minor = true
+		}
+		
 		key_table(key_code[:], &out_buffer) or_return
+		
+		// Append 'm' suffix for minor keys
+		if is_minor {
+			out_buffer = fmt.aprintf("%sm", out_buffer)
+		}
 
 		append(
 			tokens,

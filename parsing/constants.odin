@@ -26,3 +26,12 @@ G_FLAT_SCALE :: [7]string{"Gb", "Ab", "Bb", "Cb", "Db", "Eb", "F"}
 A_FLAT_SCALE :: [7]string{"Ab", "Bb", "C", "Db", "Eb", "F", "G"}
 B_FLAT_SCALE :: [7]string{"Bb", "C", "D", "Eb", "F", "G", "A"}
 
+// Minor scales (parallel approach - all natural notes relative to tonic)
+A_MINOR_SCALE :: [7]string{"A", "B", "C", "D", "E", "F", "G"}
+B_MINOR_SCALE :: [7]string{"B", "C#", "D", "E", "F#", "G", "A"}
+C_MINOR_SCALE :: [7]string{"C", "D", "Eb", "F", "G", "Ab", "Bb"}
+D_MINOR_SCALE :: [7]string{"D", "E", "F", "G", "A", "Bb", "C"}
+E_MINOR_SCALE :: [7]string{"E", "F#", "G", "A", "B", "C", "D"}
+F_MINOR_SCALE :: [7]string{"F", "G", "Ab", "Bb", "C", "Db", "Eb"}
+G_MINOR_SCALE :: [7]string{"G", "A", "Bb", "C", "D", "Eb", "F"}
+

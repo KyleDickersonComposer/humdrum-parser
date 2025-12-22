@@ -168,6 +168,27 @@ create_scale :: proc(s: ^[7]string, scale: string) -> types.Shared_Error {
 	case "Bb":
 		s^ = B_FLAT_SCALE
 		return nil
+	case "Am":
+		s^ = A_MINOR_SCALE
+		return nil
+	case "Bm":
+		s^ = B_MINOR_SCALE
+		return nil
+	case "Cm":
+		s^ = C_MINOR_SCALE
+		return nil
+	case "Dm":
+		s^ = D_MINOR_SCALE
+		return nil
+	case "Em":
+		s^ = E_MINOR_SCALE
+		return nil
+	case "Fm":
+		s^ = F_MINOR_SCALE
+		return nil
+	case "Gm":
+		s^ = G_MINOR_SCALE
+		return nil
 	}
 
 	log.error("invalid scale:", scale)
