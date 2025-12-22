@@ -104,8 +104,8 @@ tokenize :: proc(
 			parsing.eat(&p)
 			continue
 
-		case 'L', 'J':
-			// Beaming characters (beam open/close) - ignore
+		case 'L', 'J', 'k', '(', ')':
+			// Beaming characters (beam open/close, partial beam) and slur characters - ignore
 			parsing.eat(&p)
 			continue
 
@@ -115,11 +115,15 @@ tokenize :: proc(
 
 		case:
 			log.error(
-				"found unexpected character at the beginning of line:",
-				p.line_count,
+				"found unexpected character '",
+				p.current,
+				"' (rune:",
+				p.current,
+				") at the beginning of line:",
+				p.line_count + 1,
 				"at rune index:",
 				p.index,
-				"invalid_line_start rune for 'kern', and likely to be an error of some kind",
+				"- invalid_line_start rune for 'kern'",
 			)
 			return tokens, .Invalid_Token
 		}

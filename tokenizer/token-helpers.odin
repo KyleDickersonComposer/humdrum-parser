@@ -92,6 +92,20 @@ eat_until :: proc(p: ^types.Parser, rune_buffer: ^[dynamic]rune, needle: rune) -
 	return nil
 }
 
+// Eat the rest of the line until newline or EOF (without storing characters)
+eat_line :: proc(p: ^types.Parser) -> types.Tokenizer_Error {
+	for {
+		if p.index >= len(p.data) {
+			return nil
+		}
+		if p.current == '\n' || p.current == utf8.RUNE_EOF {
+			return nil
+		}
+		parsing.eat(p)
+	}
+	return nil
+}
+
 peek :: proc(p: ^types.Parser, offset: int = 1) -> (rune, types.Tokenizer_Error) {
 	pos := p.index + offset
 	if pos < 0 {
@@ -142,18 +156,14 @@ key_table :: proc(note_name: []rune, out: ^string) -> (err: types.Tokenizer_Erro
 	to_string := utf8.runes_to_string(rest)
 	defer delete(to_string)
 
+	converted_accidental := ""
 	if len(rest) > 0 {
-		// Check if it's a valid accidental
-		found := false
-		for acc in parsing.ACCIDENTAL {
-			if acc == to_string {
-				found = true
-				break
-			}
-		}
-		if !found {
+		// Convert Humdrum accidental notation (e.g., "-") to standard (e.g., "b")
+		accidental_converted, acc_err := convert_humdrum_accidentals_to_normal_accidentals(to_string)
+		if acc_err != nil {
 			return .Failed_To_Match_Accidental
 		}
+		converted_accidental = accidental_converted
 	}
 
 	// Normalize to uppercase
@@ -162,9 +172,9 @@ key_table :: proc(note_name: []rune, out: ^string) -> (err: types.Tokenizer_Erro
 		note_char = rune(int(note_char) - 32) // Convert to uppercase
 	}
 
-	// Build the key name
+	// Build the key name with converted accidental
 	if len(rest) > 0 {
-		out^ = fmt.aprintf("%c%v", note_char, to_string)
+		out^ = fmt.aprintf("%c%v", note_char, converted_accidental)
 	} else {
 		out^ = fmt.aprintf("%c", note_char)
 	}
@@ -200,27 +210,50 @@ parse_accidental :: proc(
 	length: int,
 	err: types.Tokenizer_Error,
 ) {
-	append(out_runes, p.current)
+	first_rune := p.current
+	append(out_runes, first_rune)
 	parsing.eat(p)
 
 	count := 1
 
-	for i in 1 ..< 4 {
-		if p.current != out_runes[0] {
-			return count, nil
+	for i in 1 ..< 4 { // Allow up to 3 characters for parsing, then validate
+		if p.current != first_rune {
+			break // Different character, stop collecting
 		}
 
-		if is_accidental_rune(p.current) && p.current == out_runes[0] {
+		if is_accidental_rune(p.current) {
 			count += 1
 			append(out_runes, p.current)
+			parsing.eat(p)
+		} else {
+			break
 		}
 	}
 
-	to_string := utf8.runes_to_string(out_runes[:])
+	to_string := utf8.runes_to_string(out_runes[:count])
 	defer delete(to_string)
 
-	log.error("expected valid accidental, got:", out_runes)
+	// Validate against the list of known valid accidentals
+	is_valid_accidental := false
+	for acc in parsing.ACCIDENTAL {
+		if acc == to_string {
+			is_valid_accidental = true
+			break
+		}
+	}
+
+	if !is_valid_accidental {
+		log.error(
+			"Invalid accidental:",
+			fmt.tprintf("'%s'", to_string),
+			fmt.tprintf("(%d characters) at line:", count),
+			p.line_count + 1,
+			"- not a valid Humdrum accidental (expected #, ##, -, --, n)",
+		)
 	return 0, .Failed_To_Match_Accidental
+	}
+
+	return count, nil
 }
 
 parse_int_runes :: proc(p: ^types.Parser) -> (value: int, err: types.Tokenizer_Error) {
@@ -638,15 +671,15 @@ parse_unknown_tandem :: proc(
 	// Eat the asterisk
 	_, _ = parse_repeating_rune(p) or_return
 
-	// Get the code for logging
+	// Get the code for potential warning
 	ti_code := make([dynamic]rune)
 	defer delete(ti_code)
 	for p.current != '\t' && p.current != '\n' && p.current != utf8.RUNE_EOF {
 		append(&ti_code, p.current)
 		parsing.eat(p)
 	}
-	ti_code_string := utf8.runes_to_string(ti_code[:])
 
+	ti_code_string := utf8.runes_to_string(ti_code[:])
 	if len(ti_code_string) > 0 {
 		log.warn(
 			"Unsupported tandem interpretation code:",
@@ -656,7 +689,8 @@ parse_unknown_tandem :: proc(
 			"- ignoring (not in valid codes map)",
 		)
 	}
-
+	// After warning, eat the rest of the line to avoid duplicate warnings for other spines
+	eat_line(p)
 	return nil
 }
 
@@ -1040,7 +1074,7 @@ parse_note :: proc(
 		
 		return nil
 	}
-	
+
 	// HARD ERROR: # and - are accidentals and MUST appear AFTER a note name
 	// Standalone "4#" or "4-" should never exist - these must error
 	if p.current == '#' || p.current == '-' {
@@ -1153,9 +1187,11 @@ parse_note :: proc(
 			)
 			return .Invalid_Token
 		}
-		// Stop eating if we encounter beaming characters (J, L) - let tokenizer handle them
-		if p.current == 'J' || p.current == 'L' {
-			break
+		// Beaming characters (J, L, k) and slur characters ((), ) - just consume them
+		// These are part of the note data but don't need to be stored
+		if p.current == 'J' || p.current == 'L' || p.current == 'k' || p.current == '(' || p.current == ')' {
+			parsing.eat(p)
+			continue
 		}
 		append(eated, p.current)
 		parsing.eat(p)
