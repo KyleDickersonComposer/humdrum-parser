@@ -340,9 +340,8 @@ build_ir :: proc(
 					}
 
 					note_repeat_count := note_token.note_repeat_count
-					if !note_token.is_lower_case {
-						note_repeat_count -= 1
-					}
+					// Note: note_repeat_count is already adjusted for case in the tokenizer
+					// (uppercase notes have negative repeat_count, and 1 is subtracted)
 
 					staff_index := 0
 					if voice_index > 2 {
