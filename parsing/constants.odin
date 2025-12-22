@@ -34,4 +34,5 @@ D_MINOR_SCALE :: [7]string{"D", "E", "F", "G", "A", "Bb", "C"}
 E_MINOR_SCALE :: [7]string{"E", "F#", "G", "A", "B", "C", "D"}
 F_MINOR_SCALE :: [7]string{"F", "G", "Ab", "Bb", "C", "Db", "Eb"}
 G_MINOR_SCALE :: [7]string{"G", "A", "Bb", "C", "D", "Eb", "F"}
+F_SHARP_MINOR_SCALE :: [7]string{"F#", "G#", "A", "B", "C#", "D", "E"}
 
