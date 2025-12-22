@@ -235,7 +235,8 @@ build_ir :: proc(
 				},
 			)
 
-			current_bar += 1
+			// Set current_bar to the bar number from the bar line (ground truth)
+			current_bar = bar.bar_number
 			for &i in timestamp_array {
 				i = 1
 			}
