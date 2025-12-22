@@ -191,8 +191,8 @@ build_ir :: proc(
 			if bar.bar_number == 1 &&
 			   len(bar_data_tokens) > 0 &&
 			   bar_data_tokens[0].bar_number == 0 {
-				// Real pickup - update bar 0 meter to match bar 1 (same meter for pickup and bar 1)
-				bar_data_tokens[0].meter = meter
+					// Real pickup - update bar 0 meter to match bar 1 (same meter for pickup and bar 1)
+					bar_data_tokens[0].meter = meter
 			}
 
 			staff_grp_IDs := make([]string, 1)
@@ -279,14 +279,41 @@ build_ir :: proc(
 						continue
 					}
 
+					// Get scale first to check for implicit naturals
+					scale: [7]string
+					scale_err := parsing.create_scale(&scale, key)
+					if scale_err != nil {
+						return json_struct, scale_err
+					}
+
 					corrected_accidental := ""
 					if accid != "" {
+						// Explicit accidental in Humdrum - convert it
 						corrected, acc_err :=
 							parsing.convert_humdrum_accidentals_to_normal_accidentals(accid)
 						if acc_err != nil {
 							return json_struct, acc_err
 						}
 						corrected_accidental = corrected
+					} else {
+						// No explicit accidental in Humdrum - check if scale note has accidental
+						// If scale note has accidental, Humdrum is using implicit natural
+						temp_note_name_for_scale_lookup := fmt.aprintf("%v", note_name, allocator = context.temp_allocator)
+						temp_scale_degree, temp_scale_deg_err := parsing.get_scale_degree(temp_note_name_for_scale_lookup, &scale)
+						if temp_scale_deg_err == nil {
+							// Check what note is at this scale degree
+							scale_note_at_degree := scale[(temp_scale_degree - 1) % 7]
+							scale_note_runes := utf8.string_to_runes(scale_note_at_degree)
+							defer delete(scale_note_runes)
+							
+							// If scale note has an accidental (length > 1), and Humdrum has no accidental,
+							// it's an implicit natural
+							if len(scale_note_runes) > 1 {
+								// Scale note has accidental (e.g., "F#"), Humdrum just has "F"
+								// This means they want F natural (implicit natural)
+								corrected_accidental = "n"
+							}
+						}
 					}
 
 					note_id := alloc_uuid_string()
@@ -320,12 +347,6 @@ build_ir :: proc(
 					staff_index := 0
 					if voice_index > 2 {
 						staff_index = 1
-					}
-
-					scale: [7]string
-					scale_err := parsing.create_scale(&scale, key)
-					if scale_err != nil {
-						return json_struct, scale_err
 					}
 
 					duration_as_float, dur_err := parsing.get_duration_as_float(duration_as_int)
