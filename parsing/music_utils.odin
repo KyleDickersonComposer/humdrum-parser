@@ -259,6 +259,8 @@ get_duration_as_float :: proc(duration: int) -> (f32, types.Shared_Error) {
 		return 0.5, nil
 	case 16:
 		return 0.25, nil
+	case 32:
+		return 0.125, nil
 
 	case:
 		log.error("expected valid duration, got:", duration)
@@ -280,6 +282,8 @@ get_duration_as_string :: proc(duration: int) -> (string, types.Shared_Error) {
 		return "eighth", nil
 	case 16:
 		return "sixteenth", nil
+	case 32:
+		return "thirty-second", nil
 	case:
 		log.error("expected valid duration, got:", duration)
 		return "", types.Parsing_Error.Failed_To_Convert_Duration
