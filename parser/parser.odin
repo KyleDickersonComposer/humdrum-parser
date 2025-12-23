@@ -135,8 +135,24 @@ parse :: proc(
 			}
 
 		case .Rest:
-			// Rests not currently handled, skip
-			log.warn("Rest tokens not yet implemented")
+			// Convert rest token to a note token with empty note_name to represent a rest
+			// This allows us to store rests and notes together, maintaining chronological order
+			rest_token := token.token.(types.Token_Rest)
+			rest_as_note := types.Token_Note{
+				duration          = rest_token.duration,
+				dots              = rest_token.dots,
+				note_name         = "", // Empty note_name indicates a rest
+				accidental        = "",
+				tie_start         = false,
+				tie_end           = false,
+				has_fermata       = false,
+				note_repeat_count = 0,
+				is_lower_case     = false,
+				line              = rest_token.line,
+			}
+			if current_voice_index < 4 {
+				append(&current_line_tokens[current_voice_index], rest_as_note)
+			}
 
 		case .Voice_Separator:
 			current_voice_index += 1

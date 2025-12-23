@@ -252,66 +252,63 @@ build_ir :: proc(
 					note_name := note_token.note_name
 					accid := note_token.accidental
 
-					// Skip if note_name is empty or doesn't start with a valid note letter
-					if note_name == "" {
-						log.info(
-							"Skipping note token with empty note_name at bar",
-							current_bar,
-							"voice",
-							voice_index,
-						)
-						continue
-					}
-
-					// Check if first character is a valid note name
-					note_name_runes := utf8.string_to_runes(note_name)
-					// No delete needed - scratch arena handles cleanup
-					if len(note_name_runes) == 0 ||
-					   !parsing.is_note_name_rune(note_name_runes[0]) {
-						log.info(
-							"Skipping note token with invalid note_name:",
-							note_name,
-							"at bar",
-							current_bar,
-							"voice",
-							voice_index,
-						)
-						continue
-					}
-
-					// Get scale first to check for implicit naturals
-					scale: [7]string
-					scale_err := parsing.create_scale(&scale, key)
-					if scale_err != nil {
-						return json_struct, scale_err
-					}
-
+					// Handle rest tokens (empty note_name indicates a rest)
+					is_rest := note_name == ""
+					
 					corrected_accidental := ""
-					if accid != "" {
-						// Explicit accidental in Humdrum - convert it
-						corrected, acc_err :=
-							parsing.convert_humdrum_accidentals_to_normal_accidentals(accid)
-						if acc_err != nil {
-							return json_struct, acc_err
+					
+					if !is_rest {
+
+						// Skip if note_name doesn't start with a valid note letter
+						// Check if first character is a valid note name
+						note_name_runes := utf8.string_to_runes(note_name)
+						// No delete needed - scratch arena handles cleanup
+						if len(note_name_runes) == 0 ||
+						   !parsing.is_note_name_rune(note_name_runes[0]) {
+							log.info(
+								"Skipping note token with invalid note_name:",
+								note_name,
+								"at bar",
+								current_bar,
+								"voice",
+								voice_index,
+							)
+							continue
 						}
-						corrected_accidental = corrected
-					} else {
-						// No explicit accidental in Humdrum - check if scale note has accidental
-						// If scale note has accidental, Humdrum is using implicit natural
-						temp_note_name_for_scale_lookup := fmt.aprintf("%v", note_name, allocator = context.temp_allocator)
-						temp_scale_degree, temp_scale_deg_err := parsing.get_scale_degree(temp_note_name_for_scale_lookup, &scale)
-						if temp_scale_deg_err == nil {
-							// Check what note is at this scale degree
-							scale_note_at_degree := scale[(temp_scale_degree - 1) % 7]
-							scale_note_runes := utf8.string_to_runes(scale_note_at_degree)
-							defer delete(scale_note_runes)
-							
-							// If scale note has an accidental (length > 1), and Humdrum has no accidental,
-							// it's an implicit natural
-							if len(scale_note_runes) > 1 {
-								// Scale note has accidental (e.g., "F#"), Humdrum just has "F"
-								// This means they want F natural (implicit natural)
-								corrected_accidental = "n"
+
+						// Get scale first to check for implicit naturals
+						scale: [7]string
+						scale_err := parsing.create_scale(&scale, key)
+						if scale_err != nil {
+							return json_struct, scale_err
+						}
+
+						if accid != "" {
+							// Explicit accidental in Humdrum - convert it
+							corrected, acc_err :=
+								parsing.convert_humdrum_accidentals_to_normal_accidentals(accid)
+							if acc_err != nil {
+								return json_struct, acc_err
+							}
+							corrected_accidental = corrected
+						} else {
+							// No explicit accidental in Humdrum - check if scale note has accidental
+							// If scale note has accidental, Humdrum is using implicit natural
+							temp_note_name_for_scale_lookup := fmt.aprintf("%v", note_name, allocator = context.temp_allocator)
+							temp_scale_degree, temp_scale_deg_err := parsing.get_scale_degree(temp_note_name_for_scale_lookup, &scale)
+							if temp_scale_deg_err == nil {
+								// Check what note is at this scale degree
+								scale_note_at_degree := scale[(temp_scale_degree - 1) % 7]
+								scale_note_runes := utf8.string_to_runes(scale_note_at_degree)
+								defer delete(scale_note_runes)
+								
+								// If scale note has an accidental (length > 1), and Humdrum has no accidental,
+								// it's an implicit natural
+								if len(scale_note_runes) > 1 {
+									// Scale note has accidental (e.g., "F#"), Humdrum just has "F"
+									// This means they want F natural (implicit natural)
+									corrected_accidental = "n"
+								}
 							}
 						}
 					}
@@ -354,32 +351,47 @@ build_ir :: proc(
 						return json_struct, dur_err
 					}
 
-					full_note_name := fmt.aprintf(
-						"%v%v",
-						note_name,
-						accid,
-						allocator = context.temp_allocator,
-					)
-
 					note.ID = note_id
 					duration_str, dur_str_err := parsing.get_duration_as_string(duration_as_int)
 					if dur_str_err != nil {
 						return json_struct, dur_str_err
 					}
 					note.duration = duration_str
-					note.is_rest = false
-					note.input_octave = 4 + note_repeat_count
-					note.accidental = corrected_accidental
-					note.input_scale = key
+					note.is_rest = is_rest
 					note.dots = dots
 					note.voice_ID = voice_index_to_voice_ID[voice_index]
 					note.bar_number = current_bar
 					note.staff_ID = staffs[staff_index].ID
-					scale_degree, scale_deg_err := parsing.get_scale_degree(full_note_name, &scale)
-					if scale_deg_err != nil {
-						return json_struct, scale_deg_err
+					
+					if !is_rest {
+						full_note_name := fmt.aprintf(
+							"%v%v",
+							note_name,
+							accid,
+							allocator = context.temp_allocator,
+						)
+						note.input_octave = 4 + note_repeat_count
+						note.accidental = corrected_accidental
+						note.input_scale = key
+						
+						// Get scale for scale degree calculation
+						scale: [7]string
+						scale_err := parsing.create_scale(&scale, key)
+						if scale_err != nil {
+							return json_struct, scale_err
+						}
+						scale_degree, scale_deg_err := parsing.get_scale_degree(full_note_name, &scale)
+						if scale_deg_err != nil {
+							return json_struct, scale_deg_err
+						}
+						note.scale_degree = scale_degree
+					} else {
+						// For rests, set default values
+						note.input_octave = 4
+						note.accidental = ""
+						note.input_scale = key
+						note.scale_degree = 0 // Rests don't have scale degrees
 					}
-					note.scale_degree = scale_degree
 
 					if note.dots == 0 {
 						note.timestamp = timestamp_array[voice_index]
