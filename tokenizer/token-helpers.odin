@@ -546,7 +546,6 @@ parse_valid_tandem_code :: proc(
 
 	if !found {
 		// Shouldn't happen if classification was correct
-		log.info("valid code not found:", ti_code_string)
 	}
 
 	return nil
@@ -693,13 +692,7 @@ parse_unknown_tandem :: proc(
 
 	ti_code_string := utf8.runes_to_string(ti_code[:])
 	if len(ti_code_string) > 0 {
-		log.info(
-			"Unsupported tandem interpretation code:",
-			ti_code_string,
-			"at line:",
-			p.line_count + 1,
-			"- ignoring (not in valid codes map)",
-		)
+		// Unsupported tandem interpretation code - ignoring
 	}
 	// After warning, eat the rest of the line to avoid duplicate warnings for other spines
 	eat_line(p)
@@ -717,7 +710,7 @@ parse_exclamation_line :: proc(
 	switch line_kind {
 	case .Comment:
 		// Comments are ignored - just eat the line without creating a token
-		log.info("comments are ignored, line:", p.line_count + 1)
+		// Comments are ignored
 		// Eat all the exclamation marks
 		_, _ = parse_repeating_rune(p) or_return
 		// Eat rest of comment line (no token created)
@@ -772,14 +765,6 @@ parse_exclamation_line :: proc(
 
 		// Unsupported code - ignore (no token created)
 		if !match_found {
-			log.info(
-				"unsupported reference record code:",
-				code_string,
-				"line count:",
-				p.line_count,
-				"on line:",
-				p.line_count + 1,
-			)
 			// Eat rest of line (no token created)
 			clear(eated)
 			eat_until(p, eated, '\n')
@@ -1125,7 +1110,6 @@ parse_note :: proc(
 
 	// Eat courtesy accidental if present
 	if p.current == 'X' {
-		log.info("courtesy accidentals are ignored")
 		parsing.eat(p)
 	}
 

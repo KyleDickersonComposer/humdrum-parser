@@ -265,14 +265,6 @@ build_ir :: proc(
 						// No delete needed - scratch arena handles cleanup
 						if len(note_name_runes) == 0 ||
 						   !parsing.is_note_name_rune(note_name_runes[0]) {
-							log.info(
-								"Skipping note token with invalid note_name:",
-								note_name,
-								"at bar",
-								current_bar,
-								"voice",
-								voice_index,
-							)
 							continue
 						}
 

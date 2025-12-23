@@ -203,7 +203,6 @@ parse :: proc(
 			return tree, nil
 
 		case:
-			log.info("unhandled token kind in syntax parser:", token.kind)
 		}
 
 		token_index += 1
