@@ -976,14 +976,18 @@ parse_bar_line :: proc(
 
 	if len(eated) == 0 {
 		// No number found - might be special barline like =:|! or just =
-		// Use 0 as default or try to get previous bar number
+		// Use 0 as default or try to get previous bar number.
+		// For special barlines without an explicit number (e.g. =:|!),
+		// we treat them as *decorations* on the previous barline and
+		// DO NOT advance the bar count here. The next explicit bar number
+		// (e.g. =5) becomes the next bar.
 		bar_number := 0
 		if len(tokens) > 0 {
 			// Try to get last bar number
 			for i := len(tokens) - 1; i >= 0; i -= 1 {
 				if tokens[i].kind == .Bar_Line {
 					bar_line := tokens[i].token.(types.Token_Bar_Line)
-					bar_number = bar_line.bar_number + 1
+					bar_number = bar_line.bar_number
 					break
 				}
 			}
