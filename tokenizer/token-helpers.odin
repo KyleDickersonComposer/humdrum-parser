@@ -546,7 +546,7 @@ parse_valid_tandem_code :: proc(
 
 	if !found {
 		// Shouldn't happen if classification was correct
-		log.warn("valid code not found:", ti_code_string)
+		log.info("valid code not found:", ti_code_string)
 	}
 
 	return nil
@@ -693,7 +693,7 @@ parse_unknown_tandem :: proc(
 
 	ti_code_string := utf8.runes_to_string(ti_code[:])
 	if len(ti_code_string) > 0 {
-		log.warn(
+		log.info(
 			"Unsupported tandem interpretation code:",
 			ti_code_string,
 			"at line:",
@@ -772,7 +772,7 @@ parse_exclamation_line :: proc(
 
 		// Unsupported code - ignore (no token created)
 		if !match_found {
-			log.warn(
+			log.info(
 				"unsupported reference record code:",
 				code_string,
 				"line count:",
@@ -1125,7 +1125,7 @@ parse_note :: proc(
 
 	// Eat courtesy accidental if present
 	if p.current == 'X' {
-		log.warn("courtesy accidentals are ignored")
+		log.info("courtesy accidentals are ignored")
 		parsing.eat(p)
 	}
 
