@@ -195,18 +195,34 @@ build_ir :: proc(
 					bar_data_tokens[0].meter = meter
 			}
 
-			staff_grp_IDs := make([]string, 1)
-			staff_grp_IDs[0] = staff_grps[0].ID
-			append(
-				&bar_data_tokens,
-				types.Layout {
-					bar_number = bar.bar_number,
-					key = key,
-					has_layout_changed = has_changed,
-					staff_grp_IDs = staff_grp_IDs,
-					meter = meter,
-				},
-			)
+			// Check if layout for this bar_number already exists
+			layout_exists := false
+			for &existing_layout in bar_data_tokens {
+				if existing_layout.bar_number == bar.bar_number {
+					// Update existing layout instead of creating duplicate
+					existing_layout.key = key
+					existing_layout.meter = meter
+					existing_layout.has_layout_changed = has_changed
+					layout_exists = true
+					break
+				}
+			}
+
+			// Only append if layout doesn't exist
+			if !layout_exists {
+				staff_grp_IDs := make([]string, 1)
+				staff_grp_IDs[0] = staff_grps[0].ID
+				append(
+					&bar_data_tokens,
+					types.Layout {
+						bar_number = bar.bar_number,
+						key = key,
+						has_layout_changed = has_changed,
+						staff_grp_IDs = staff_grp_IDs,
+						meter = meter,
+					},
+				)
+			}
 
 			// Set current_bar to the bar number from the bar line (ground truth)
 			current_bar = bar.bar_number
