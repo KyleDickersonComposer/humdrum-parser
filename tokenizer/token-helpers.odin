@@ -32,6 +32,8 @@ debug_print_tokens :: proc(tokens: []types.Token_With_Kind) {
 		case .Bar_Line:
 			bar := token.token.(types.Token_Bar_Line)
 			fmt.printf("Bar_Line - bar_number:%d\n", bar.bar_number)
+		case .Repeat_Decoration_Barline:
+			fmt.printf("Repeat_Decoration_Barline\n")
 		case .Double_Bar:
 			fmt.printf("Double_Bar\n")
 		case .Exclusive_Interpretation:
@@ -1000,14 +1002,25 @@ parse_bar_line :: proc(
 			bar_number += 1
 		}
 
-		append(
-			tokens,
-			types.Token_With_Kind {
-				kind = .Bar_Line,
-				token = types.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
-				line = p.line_count,
-			},
-		)
+		if is_special_barline {
+			append(
+				tokens,
+				types.Token_With_Kind {
+					kind = .Repeat_Decoration_Barline,
+					token = types.Token_Repeat_Decoration_Barline{line = p.line_count},
+					line = p.line_count,
+				},
+			)
+		} else {
+			append(
+				tokens,
+				types.Token_With_Kind {
+					kind = .Bar_Line,
+					token = types.Token_Bar_Line{bar_number = bar_number, line = p.line_count},
+					line = p.line_count,
+				},
+			)
+		}
 
 		// Eat rest of line (including special characters like :|!)
 		eat_until(p, eated, '\n')

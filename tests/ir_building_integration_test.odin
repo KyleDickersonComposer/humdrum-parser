@@ -100,3 +100,79 @@ test_ir_building_integration :: proc(t: ^testing.T) {
 	testing.expect(t, len(ir.layouts[0].staff_grp_IDs) > 0, "First layout should have staff group IDs")
 }
 
+@(test)
+test_repeat_decoration_barline_does_not_reset_timestamps :: proc(t: ^testing.T) {
+	context.random_generator = crypto.random_generator()
+	
+	// Setup arenas like main() does
+	main_arena: virtual.Arena
+	alloc_err := virtual.arena_init_growing(&main_arena)
+	if alloc_err != nil {
+		testing.fail_now(t, "Failed to initialize main arena")
+	}
+	defer virtual.arena_destroy(&main_arena)
+	
+	scratch_arena: virtual.Arena
+	scratch_err := virtual.arena_init_growing(&scratch_arena)
+	if scratch_err != nil {
+		testing.fail_now(t, "Failed to initialize scratch arena")
+	}
+	defer virtual.arena_destroy(&scratch_arena)
+	
+	context.allocator = virtual.arena_allocator(&main_arena)
+	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
+	
+	data := `**kern	**kern	**kern	**kern
+*ICvox	*ICvox	*ICvox	*ICvox
+*Ibass	*Itenor	*Ialto	*Isoprn
+*k[]	*k[]	*k[]	*k[]
+*kC	*kC	*kC	*kC
+*M4/4	*M4/4	*M4/4	*M4/4
+=1	=1	=1	=1
+4A	4c	4e	4a
+=:|!	=:|!	=:|!	=:|!
+4B	4d	4f	4b
+==	==	==	==
+`
+
+	parse_data := utf8.string_to_runes(data)
+	defer delete(parse_data)
+	
+	virtual.arena_destroy(&scratch_arena)
+	scratch_err = virtual.arena_init_growing(&scratch_arena)
+	if scratch_err != nil {
+		testing.fail_now(t, "Failed to reinitialize scratch arena")
+	}
+	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
+
+	tokens, token_err := tokenizer.tokenize(&parse_data)
+	testing.expect_value(t, token_err, nil)
+
+	tree, parse_err := parser.parse(&tokens)
+	testing.expect_value(t, parse_err, nil)
+
+	virtual.arena_destroy(&scratch_arena)
+	scratch_err = virtual.arena_init_growing(&scratch_arena)
+	if scratch_err != nil {
+		testing.fail_now(t, "Failed to reinitialize scratch arena")
+	}
+	context.temp_allocator = virtual.arena_allocator(&scratch_arena)
+
+	ir, build_err := build_ir.build_ir(&tree)
+	testing.expect_value(t, build_err, nil)
+
+	// We expect 8 notes: 4 voices * 2 data lines
+	testing.expect_value(t, len(ir.notes), 8)
+
+	// The second data line should start at timestamp 2 (after a quarter note at timestamp 1)
+	// Repeat decoration barline must not reset timestamps.
+	second_line_found := false
+	for note in ir.notes {
+		if note.bar_number == 1 && note.timestamp == 2 {
+			second_line_found = true
+			break
+		}
+	}
+	testing.expect(t, second_line_found, "Expected notes after repeat decoration to continue at timestamp=2")
+}
+

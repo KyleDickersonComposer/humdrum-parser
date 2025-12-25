@@ -78,6 +78,11 @@ parse :: proc(
 				},
 			)
 
+		case .Repeat_Decoration_Barline:
+			// Repeat/decoration barlines like =:|! are ornamental for our purposes.
+			// They should not create a bar boundary or reset timestamps.
+			// Ignore.
+
 		case .Double_Bar:
 			append(
 				&tree.records,

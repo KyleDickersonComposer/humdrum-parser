@@ -96,6 +96,7 @@ Token_Kind :: enum {
 	Reference_Record,
 	Comment,
 	Bar_Line,
+	Repeat_Decoration_Barline,
 	Double_Bar,
 	Note,
 	Rest,
@@ -131,6 +132,10 @@ Token_Comment :: struct {
 Token_Bar_Line :: struct {
 	bar_number: int,
 	line:       int,
+}
+
+Token_Repeat_Decoration_Barline :: struct {
+	line: int,
 }
 
 Token_Note :: struct {
@@ -170,6 +175,7 @@ Token :: union {
 	Token_Reference_Record,
 	Token_Comment,
 	Token_Bar_Line,
+	Token_Repeat_Decoration_Barline,
 	Token_Double_Bar,
 	Token_Note,
 	Token_Rest,
