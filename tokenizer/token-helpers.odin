@@ -976,11 +976,12 @@ parse_bar_line :: proc(
 
 	if len(eated) == 0 {
 		// No number found - might be special barline like =:|! or just =
-		// Use 0 as default or try to get previous bar number.
-		// For special barlines without an explicit number (e.g. =:|!),
-		// we treat them as *decorations* on the previous barline and
-		// DO NOT advance the bar count here. The next explicit bar number
-		// (e.g. =5) becomes the next bar.
+		// Check if this is a special barline (has :, |, or !) or a regular barline
+		is_special_barline := false
+		if p.current == ':' || p.current == '|' || p.current == '!' {
+			is_special_barline = true
+		}
+
 		bar_number := 0
 		if len(tokens) > 0 {
 			// Try to get last bar number
@@ -991,6 +992,12 @@ parse_bar_line :: proc(
 					break
 				}
 			}
+		}
+
+		// For regular barlines (just =), increment the bar number
+		// For special barlines (e.g. =:|!), treat as decoration and keep same bar number
+		if !is_special_barline && bar_number >= 0 {
+			bar_number += 1
 		}
 
 		append(
