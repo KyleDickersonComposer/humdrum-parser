@@ -208,6 +208,21 @@ build_ir :: proc(
 				}
 			}
 
+			// Special case: If this barline has the same bar_number as the last layout,
+			// it's likely a repeat/decoration barline (e.g., =:|!) and should not create a new layout
+			// Just update the existing one if found, or skip if it's truly a decoration
+			if !layout_exists && len(bar_data_tokens) > 0 {
+				last_layout := bar_data_tokens[len(bar_data_tokens) - 1]
+				if last_layout.bar_number == bar.bar_number {
+					// This is a decoration barline (repeat, segno, etc.) - don't create duplicate
+					// Just update the last layout if needed
+					bar_data_tokens[len(bar_data_tokens) - 1].key = key
+					bar_data_tokens[len(bar_data_tokens) - 1].meter = meter
+					bar_data_tokens[len(bar_data_tokens) - 1].has_layout_changed = has_changed
+					layout_exists = true
+				}
+			}
+
 			// Only append if layout doesn't exist
 			if !layout_exists {
 				staff_grp_IDs := make([]string, 1)
