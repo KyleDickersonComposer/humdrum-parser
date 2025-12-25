@@ -50,7 +50,7 @@ build_ir :: proc(
 			types.Voice {
 				ID = voice_id,
 				type = voice_type,
-				voice_index_of_staff = i % 2,
+				voice_index_of_staff = (i % 2) + 1, // 1-based for MEI
 				is_CF = false,
 				is_bass = is_bass,
 				is_editable = true,
@@ -81,7 +81,7 @@ build_ir :: proc(
 
 		append(
 			&staffs,
-			types.Staff{ID = staff_id, staff_index = i, clef = clef, voice_IDs = voice_IDs},
+			types.Staff{ID = staff_id, staff_index = i + 1, clef = clef, voice_IDs = voice_IDs}, // 1-based for MEI
 		)
 	}
 
@@ -440,18 +440,6 @@ build_ir :: proc(
 
 	if len(json_struct.layouts) > 0 {
 		json_struct.layouts[len(json_struct.layouts) - 1].right_barline_type = "end"
-	}
-
-	for &n in json_struct.notes {
-		for v in json_struct.voices {
-			if n.voice_ID == v.ID {
-				if v.voice_index_of_staff == 0 {
-					n.stem_dir = "down"
-				} else {
-					n.stem_dir = "up"
-				}
-			}
-		}
 	}
 
 	json_struct.metadata = meta
