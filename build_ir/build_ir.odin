@@ -60,9 +60,9 @@ build_ir :: proc(
 
 	staffs := make([dynamic]types.Staff)
 	for i in 0 ..< 2 {
-		clef := strings.clone("treble")
+		clef := strings.clone("bass")
 		if i == 0 {
-			clef = strings.clone("bass")
+			clef = strings.clone("treble")
 		}
 
 		voice_IDs := make([]string, 2)
